@@ -1,0 +1,55 @@
+#!/bin/bash
+# Pre-commit hook for secret scanning.
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+RED='\033[0;31m'
+NC='\033[0m'
+
+STAGED=$(git diff --cached --diff-filter=ACM --name-only)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+FOUND=0
+
+for FILE in $STAGED; do
+  # Skip binary files
+  if file "$FILE" | grep -q "binary"; then
+    continue
+  fi
+
+  # Check for Notion API keys (secret_ or ntn_ prefix, 40+ chars)
+  if grep -nP '(secret_|ntn_)[A-Za-z0-9]{40,}' "$FILE" 2>/dev/null; then
+    echo -e "${RED}BLOCKED: Possible Notion API key detected in $FILE${NC}"
+    FOUND=1
+  fi
+
+  # Check for Cloudflare API tokens (40+ alphanumeric)
+  if grep -nP '[A-Za-z0-9_-]{40,}' "$FILE" 2>/dev/null | grep -iP 'api.?token|cloudflare'; then
+    echo -e "${RED}BLOCKED: Possible Cloudflare token in $FILE${NC}"
+    FOUND=1
+  fi
+
+  # Check for 32-char hex strings (potential database IDs)
+  if grep -nP '[0-9a-f]{32}' "$FILE" 2>/dev/null | grep -v 'node_modules'; then
+    echo -e "${RED}WARNING: Possible database/secret ID in $FILE${NC}"
+    FOUND=1
+  fi
+done
+
+echo "Running automated linter..."
+if ! npm run lint; then
+    echo -e "${RED}Linting failed. Please fix style errors before committing.${NC}"
+    echo "You can try: npm run lint:fix"
+    FOUND=1
+fi
+
+if [ $FOUND -ne 0 ]; then
+  echo ""
+  echo -e "${RED}Commit blocked. Fix violations before committing.${NC}"
+  echo "If this is a false positive, use: git commit --no-verify"
+  exit 1
+fi
+
+exit 0
