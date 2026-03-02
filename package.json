@@ -1,0 +1,34 @@
+{
+  "name": "schedsec",
+  "version": "1.0.0",
+  "description": "AI-powered daily schedule generator using Cloudflare Workers + Notion",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "verify-schema": "node scripts/verify-schema.js",
+    "trigger-urls": "node scripts/generate-trigger-urls.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.2",
+    "eslint-plugin-jsdoc": "^62.7.1",
+    "globals": "^17.3.0",
+    "vitest": "^1.6.0",
+    "wrangler": "^3.57.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

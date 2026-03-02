@@ -1,0 +1,12 @@
+# Notion API credentials
+NOTION_API_KEY=secret_your_notion_api_key_here
+
+# Notion Database IDs (get from database URLs)
+INPUTS_DB_ID=your_inputs_database_id
+SCHEDULE_DB_ID=your_schedule_database_id
+CONTEXT_DB_ID=your_context_database_id
+LOGS_DB_ID=your_logs_database_id
+STATS_DB_ID=your_stats_database_id
+
+# Worker Authentication
+WORKER_AUTH_TOKEN=generate_a_secure_random_token_here
