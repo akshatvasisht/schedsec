@@ -1,70 +1,102 @@
-# Environment Setup Instructions
+# SchedSec Setup Guide
+
+This guide details the steps to deploy SchedSec as a personal, self-hosted scheduling assistant.
 
 ## Prerequisites
-* [Language/Runtime Version]
-* [System Dependency 1]
-* [System Dependency 2]
-
-## Installation
-
-> **Note:** First-run execution may download models, caches, or dependencies before starting.
-
-### Automated Setup (Recommended)
-You can set up the environment automatically using the setup script:
-```bash
-git clone [https://github.com/username/repo.git](https://github.com/username/repo.git)
-cd repo
-[command to run setup script, e.g., ./setup.sh]
-```
-
-### Manual Setup
-If you prefer manual setup, follow these steps:
-```bash
-git clone [https://github.com/username/repo.git](https://github.com/username/repo.git)
-cd repo
-```
-[install command, e.g., npm install or pip install -r requirements.txt]
-
-## Environment Variables
-Create a `.env` file in the root directory:
-
-### Required
-These variables must be set for the application to run.
-* `API_KEY`: [description of what it does and where to obtain it]
-* `DB_URL`: [description of what it does and where to obtain it, e.g., postgres://...]
-
-### Optional
-These variables modify default behavior.
-* `DEBUG_MODE`: [description of effect], default: `true`
-Running the Application
-Development Mode
-Bash
-
-[command to run dev server]
-Production Build
-Bash
-
-[command to build/run prod]
-
-## Logging
-
-* **Location:** Log files are stored in `[Path to logs directory, e.g., /var/log/app or ./logs]`.
-* **Configuration:** Log level can be configured via the `[LOG_LEVEL]` environment variable (e.g., `DEBUG`, `INFO`, `ERROR`).
-* **Real-time Tail:** View logs in real-time by running `tail -f [path/to/logfile.log]`.
-* **Rotation Policy:** [Placeholder for log rotation/size policy, e.g., Rotates daily or at 50MB, keeping last 7 days].
-
-## Troubleshooting
-
-### Environment & Dependency Issues
-**Issue:** `[Placeholder: e.g., ModuleNotFoundError: No module named 'library']`
-**Fix:** `[Placeholder: e.g., Ensure you have activated your virtual environment and run the install command again.]`
-
-### Runtime Errors
-**Issue:** `[Placeholder: e.g., ConnectionRefusedError when connecting to database]`
-**Fix:** `[Placeholder: e.g., Verify that the database service is running and DB_URL is correctly set in .env.]`
-
-### Network & Config Issues
-**Issue:** `[Placeholder: e.g., CORS error on API requests]`
-**Fix:** `[Placeholder: e.g., Ensure the origin domain is added to the ALLOWED_ORIGINS list in your config.]`
+* **Cloudflare Account**: [Sign up here](https://dash.cloudflare.com/sign-up). You will need access to Workers, KV, D1, R2, and Vectorize.
+* **Notion Account**: [Sign up here](https://www.notion.so/signup).
+* **Node.js**: >= 18.0.0.
+* **Wrangler CLI**: Follow the [official installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/).
 
 ---
+
+## 1. Quick Start: Notion & Cloudflare
+
+### A. Notion Template
+Instead of building databases manually, use the official SchedSec Dashboard template:
+1. Open the [SchedSec Dashboard Template](https://mirage-earth-76c.notion.site/SchedSec-Dashboard-317c470f750180dd98d1fcbd34266400?source=copy_link).
+2. Click **Duplicate** in the top-right corner to copy it to your workspace.
+
+### B. Automated Infrastructure Setup
+Clone the repository and run the setup script to provision Cloudflare resources (KV, D1, R2, Vectorize) automatically using the CLI:
+```bash
+cd schedsec
+npm install
+npx wrangler login 
+npm run setup
+```
+> [!IMPORTANT]
+> **Manual Verification**: The setup script attempts to inject resource IDs into `wrangler.toml`. Please verify that the `id` and `database_id` fields in your `wrangler.toml` match the resources shown in your [Cloudflare Dashboard](https://dash.cloudflare.com).
+
+---
+
+## 2. Notion Integration Setup
+
+SchedSec requires an **Internal Integration** to communicate with your databases.
+
+1. Go to the [Notion Integrations Dashboard](https://www.notion.so/my-integrations).
+2. Click **+ New integration**.
+3. **Integration Type**: Select **Internal** (this is the default).
+4. **Name**: `SchedSec AI`.
+5. **Capabilities**: Ensure **Read content**, **Update content**, and **Insert content** are all checked.
+6. **Save** and note the **Internal Integration Secret**.
+
+### Grant Access
+You must grant your integration access to your Dashboard page:
+1. Open the **SchedSec Dashboard** page in Notion (the top-level page containing the databases).
+2. Click the `...` menu in the top-right corner.
+3. Select **Add connections** and search for `SchedSec AI`. This will automatically grant access to all 5 databases within that page.
+
+---
+
+## 3. Configuration & Deployment
+
+### Environment Variables
+Populate your `.dev.vars` file with your Notion secret and database IDs (extracted from the Notion URLs):
+
+```env
+NOTION_API_KEY="secret_your_notion_integration_secret"
+INPUTS_DB_ID="your_inputs_db_id"
+SCHEDULE_DB_ID="your_schedule_db_id"
+CONTEXT_DB_ID="your_context_db_id"
+LOGS_DB_ID="your_logs_db_id"
+STATS_DB_ID="your_stats_db_id"
+WORKER_AUTH_TOKEN="generate_a_secure_random_string"
+BUTTON_SECRET="generate_another_random_string"
+```
+
+### Production Deployment
+Upload your secrets to Cloudflare securely and push the code:
+```bash
+npx wrangler secret put NOTION_API_KEY # (Repeat for all keys in .dev.vars)
+npm run deploy
+```
+
+---
+
+## 4. Finalizing the Dashboard (Buttons & Views)
+
+### A. Dashboard Layout
+The main **SchedSec Dashboard** page should be your primary cockpit. We recommend placing the trigger buttons at the top of this page.
+
+1. **Generate Trigger URLs**: Run this script after your first deployment to get your specific secure links:
+   ```bash
+   npm run trigger-urls https://YOUR_WORKER_URL_FROM_DEPLOYMENT
+   ```
+2. **Create Buttons**:
+   - In Notion, type `/button` on the Dashboard page to create a specialized button block.
+   - **Label**: Name it (e.g., `Regenerate`, `Undo`, or `Planning Mode`).
+   - **Action**: Select **Open URL** from the "Add step" menu.
+   - **URL**: Paste the corresponding link generated by the script in Step 1.
+
+### B. Suggested Views
+Configure these views in your duplicated databases for optimal usability:
+- **Schedule DB**: Create a "Today" view filtered by `Date is today` and sorted by `AI_Start` (Asc).
+- **Inputs DB**: Create a "Task Inbox" view filtered by `Status is Active`.
+
+---
+
+## 5. Verification
+- **Health Check**: Visit `https://YOUR_WORKER_URL/health` (requires Bearer Auth).
+- **Bootstrap**: Run `POST /bootstrap` with your `WORKER_AUTH_TOKEN` to seed your Context and add example tasks.
+- **Schema**: Run `npm run verify-schema` to confirm your Notion connection is mapped correctly.

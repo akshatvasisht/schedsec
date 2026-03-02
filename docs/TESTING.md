@@ -1,71 +1,55 @@
 # Testing Guidelines
 
 ## Strategy
-This project uses [Framework Name] for automated testing. We prioritize [Unit/Integration/E2E] tests for [Critical Component].
+SchedSec relies on **[Vitest](https://vitest.dev/)** for automated testing. Our testing philosophy prioritizes **Deterministic Verification over AI Mocking**. 
+
+Because LLM outputs (Qwen 2.5 7B) are inherently probabilistic, we do **not** write string-matching tests against AI output. Instead, our tests focus strictly on the deterministic algorithms that enforce safety constraints before the AI is invoked, and the validation schemas that verify the AI's output format.
 
 ### Test Types
-* **Unit Tests:** Test individual functions or modules in isolation. They are fast, deterministic, and verify core logic.
-* **Integration Tests:** Verify that multiple components (e.g., database, external services) work together correctly.
-* **End-to-End (E2E) Tests:** Validate the entire system pipeline from the user's perspective, typically simulating real usage flows.
+* **Unit Tests (`tests/unit/`):** Fast, isolated tests for date manipulation, buffering, learning, and time math.
+* **Integration Tests (`tests/integration/`):** Cross-module workflow integrations.
+* **Regression Tests (`tests/regression/regression.test.js`):** The core regression suite. These validate complex algorithmic logic like dependency cycle detection and energy budget enforcement.
+
+---
 
 ## Running Tests
 
 ### Automated Suite
-Run the full suite:
+Run the full suite using npm:
 ```bash
-[command, e.g., pytest or npm test]
+npm test
 ```
-Run with coverage:
-Bash
+To run tests in watch mode during development:
+```bash
+npm run test:watch
+```
 
-[command for coverage]
+---
 
-## Manual Tests
+## The Core Regression Suite (RT001 - RT010)
 
-This section covers scenarios that cannot be automated: hardware-dependent behavior, visual verification, network-dependent flows.
+All changes to the `scheduler/` algorithms MUST pass the Top 10 Regression Scenarios. These tests define the contract of SchedSec's strict constraint environment.
 
-### [Placeholder: Test Scenario Name]
-* **Purpose:** [What feature or flow is being tested]
-* **Usage:** [Step-by-step instructions to run the test]
-* **What It Tests:** [Specific components or interactions validated]
-* **Expected Output:** [What the user should see or experience on success]
+| Test ID | Scenario | Purpose |
+|---|---|---|
+| **RT001** | Simple Day | Verifies basic non-conflicting topology sorting and slot finding. |
+| **RT002** | Impossible Constraint | Verifies feasibility detection (e.g., trying to fit 3 hours of tasks into 1 hour of available time). |
+| **RT003** | Circular Dependency | Verifies the DFS cycle detector correctly halts generating if A -> B -> C -> A. |
+| **RT004** | Energy Budget Violation | Verifies tasks get deferred or split when a day exceeds maximum `Deep` work allowance. |
+| **RT005** | Fixed Appointment Conflicts | Verifies that flexible tasks cannot overwrite `FIXED_APPOINTMENT` properties. |
+| **RT006** | Critical Path Deadlines | Verifies multi-day task constraint splitting. |
+| **RT007** | Zod Schema Validation | Verifies that malformed AI responses trigger validation errors before reaching Notion. |
+| **RT008** | Panic Mode | Verifies priority overrides correctly filter out non-essential tasks. |
+| **RT009** | Multi-day Decay | Verifies the custom 40/35/25 multi-day energy decay ratio. |
+| **RT010** | Semantic Matches | Verifies correct rule inference parsing. |
 
-### [Placeholder: Another Test Scenario Name]
-* **Purpose:** [What feature or flow is being tested]
-* **Usage:** [Step-by-step instructions to run the test]
-* **What It Tests:** [Specific components or interactions validated]
-* **Expected Output:** [What the user should see or experience on success]
+---
 
 ## Writing New Tests
 
-* **Pattern:** Follow the Arrange / Act / Assert pattern.
-  ```[Language]
-  // Arrange
-  const input = setupData();
-  // Act
-  const result = processData(input);
-  // Assert
-  expect(result).toEqual(expectedOutput);
-  ```
-* **Isolation:** Tests must not share mutable state. Each test should set up and tear down its own environment.
-* **Mocking Requirements:** No live hardware or external APIs should be used in automated runs. Depend on mocks or stubs.
-* **Naming Conventions:** Name tests according to formatting standards defined in `STYLE.md`.
+* **No External Hardware/Network:** Tests must be perfectly isolated. Do NOT hit the Notion API or Cloudflare AI endpoint in the test suite.
+* **Pattern:** Follow arrange, act, assert.
+* **File Naming:** Place all tests in the `/tests` directory and use the `.test.js` suffix.
 
-## Mocking Standards
-External APIs should be mocked using [Library].
-
-Database connections should use [Strategy, e.g., in-memory SQLite].
-
-## Troubleshooting Tests
-
-### Import Errors
-**Issue:** `[Placeholder: e.g., ImportError: cannot import name 'module']`
-**Fix:** `[Placeholder: e.g., Verify your PYTHONPATH is set correctly and the test environment is activated.]`
-
-### Mocking Failures
-**Issue:** `[Placeholder: e.g., MagicMock object has no attribute 'expected_call']`
-**Fix:** `[Placeholder: e.g., Check the method name on the mocked object matches the actual implementation.]`
-
-### Test Isolation Failures
-**Issue:** `[Placeholder: e.g., Test suite passes individually but fails when run together]`
-**Fix:** `[Placeholder: e.g., Ensure global state is reset in teardown methods and avoid shared fixtures unless explicitly read-only.]`
+### Dealing with Dates
+When writing tests that involve "today", either use the `dateStr` dependency injection pattern or mock the system clock internally (Vitest provides `vi.useFakeTimers()`) to prevent tests from failing natively when crossing midnight boundaries.
