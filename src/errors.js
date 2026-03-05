@@ -3,11 +3,10 @@
  */
 
 /**
- *
+ * Base error class for all SchedSec errors.
  */
 export class SchedSecError extends Error {
   /**
-   * Base SchedSec error.
    * @param {string} message Error message.
    * @param {string} [code='UNKNOWN'] Machine-readable error code.
    */
@@ -19,41 +18,10 @@ export class SchedSecError extends Error {
 }
 
 /**
- *
- */
-export class RateLimitError extends SchedSecError {
-  /**
-   * Thrown when Notion API rate limits are hit.
-   * @param {number} [retryAfter=1000] Milliseconds to wait before retry.
-   */
-  constructor(retryAfter = 1000) {
-    super(`Rate limited. Retry after ${retryAfter}ms`, 'RATE_LIMIT');
-    this.name = 'RateLimitError';
-    this.retryAfter = retryAfter;
-  }
-}
-
-/**
- *
- */
-export class InvalidJSONError extends SchedSecError {
-  /**
-   * Thrown when AI output is not valid JSON.
-   * @param {string} rawResponse The unparsable string from the AI.
-   */
-  constructor(rawResponse) {
-    super('AI returned invalid JSON', 'INVALID_JSON');
-    this.name = 'InvalidJSONError';
-    this.rawResponse = rawResponse;
-  }
-}
-
-/**
- *
+ * Wrapper for raw Notion API failures.
  */
 export class NotionAPIError extends SchedSecError {
   /**
-   * Wrapper for raw Notion API failures.
    * @param {number} status HTTP status code.
    * @param {Object} body Error body from Notion.
    */
@@ -66,25 +34,10 @@ export class NotionAPIError extends SchedSecError {
 }
 
 /**
- *
- */
-export class ConfigurationError extends SchedSecError {
-  /**
-   * Thrown when a required environment variable or config key is missing.
-   * @param {string} missingKey Name of the missing configuration.
-   */
-  constructor(missingKey) {
-    super(`Missing configuration: ${missingKey}`, 'CONFIG');
-    this.name = 'ConfigurationError';
-  }
-}
-
-/**
- *
+ * Thrown when task dependencies form a non-resolvable cycle.
  */
 export class DependencyCycleError extends SchedSecError {
   /**
-   * Thrown when task dependencies form a non-resolvable cycle.
    * @param {Array<string>} cycle List of task IDs in the cycle.
    */
   constructor(cycle) {
@@ -95,36 +48,32 @@ export class DependencyCycleError extends SchedSecError {
 }
 
 /**
- *
+ * Thrown when the AI returns malformed JSON after all retry attempts.
  */
-export class InfeasibleScheduleError extends SchedSecError {
+export class InvalidJSONError extends SchedSecError {
   /**
-   * Thrown when total tasks exceed available energy/time budget.
-   * @param {string} reason Description of why it's infeasible.
-   * @param {number} overage Amount (minutes/energy) over budget.
+   * @param {string} rawResponse The unparsable string from the AI.
+   * @param {number} [attempts=3] How many parse attempts were made.
    */
-  constructor(reason, overage) {
-    super(`Infeasible schedule: ${reason}`, 'INFEASIBLE');
-    this.name = 'InfeasibleScheduleError';
-    this.overage = overage;
+  constructor(rawResponse, attempts = 3) {
+    super(`AI returned invalid JSON after ${attempts} attempts`, 'INVALID_JSON');
+    this.name = 'InvalidJSONError';
+    this.rawResponse = rawResponse;
+    this.attempts = attempts;
   }
 }
 
 /**
- *
+ * Thrown when the AI scheduling call fails entirely (quota, model error, etc.).
  */
-export class OptimisticLockError extends SchedSecError {
+export class AISchedulingError extends SchedSecError {
   /**
-   * Thrown when an optimistic lock conflict occurs.
-   * @param {string} taskId ID of the task being written.
-   * @param {number} expectedVersion Version the worker expected to overwrite.
-   * @param {number} actualVersion Current version in the database.
+   * @param {string} reason Human-readable failure reason.
+   * @param {number} [attempts=3] How many scheduling attempts were made.
    */
-  constructor(taskId, expectedVersion, actualVersion) {
-    super(`Lock conflict on task ${taskId}: expected v${expectedVersion}, found v${actualVersion}`, 'OPTIMISTIC_LOCK_CONFLICT');
-    this.name = 'OptimisticLockError';
-    this.taskId = taskId;
-    this.expectedVersion = expectedVersion;
-    this.actualVersion = actualVersion;
+  constructor(reason, attempts = 3) {
+    super(`AI scheduling failed after ${attempts} attempts: ${reason}`, 'AI_SCHEDULING_FAILED');
+    this.name = 'AISchedulingError';
+    this.attempts = attempts;
   }
 }

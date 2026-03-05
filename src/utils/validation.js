@@ -37,12 +37,6 @@ export const ScheduleEntrySchema = z.object({
 
 export const ScheduleResponseSchema = z.array(ScheduleEntrySchema);
 
-// --- Context DB ---
-export const ContextEntrySchema = z.object({
-  key: z.string(),
-  value: z.string(), // JSON string
-  lastSync: z.string().optional()
-});
 
 // --- ML Intelligence / Patterns ---
 export const InferencePatternSchema = z.object({

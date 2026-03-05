@@ -3,19 +3,26 @@ import { Logger } from '../logger.js';
 import { ContextManager } from '../context.js';
 import { CONFIG } from '../config.js';
 import { ScheduleResponseSchema } from '../utils/validation.js';
+import { InvalidJSONError, AISchedulingError } from '../errors.js';
 import { InferenceEngine } from '../scheduler/inference.js';
 import { OptimizationEngine } from '../scheduler/optimizations.js';
 import { DependencyResolver } from '../scheduler/dependencies.js';
 import { RecurrenceManager } from '../scheduler/recurrence.js';
-import { TaskManager } from '../scheduler/task-types.js';
+import { TaskManager } from '../scheduler/task-manager.js';
 import { MultiDayScheduler } from '../scheduler/multi-day.js';
 import { PromptBuilder } from '../scheduler/prompt.js';
 import { FallbackScheduler } from '../scheduler/fallback.js';
 import { VectorizeManager } from '../learning/vectorize.js';
 import { IdempotencyManager } from '../features/idempotency.js';
 import { PanicManager } from '../features/panic.js';
-import { PrefetchManager } from '../features/prefetching.js';
-import { OptimisticLock } from '../scheduler/locking.js';
+import { PrefetchManager } from '../features/look-ahead.js';
+import { OptimisticLock } from '../scheduler/optimistic-lock.js';
+import { CriticalPathAnalyzer } from '../scheduler/critical-path.js';
+import { BanditManager } from '../scheduler/time-slot-bandit.js';
+import { BufferLearning } from '../features/buffer-learning.js';
+import { EnergyCurve } from '../features/energy-curve.js';
+import { TaskBatching } from '../features/task-batching.js';
+import { SlotFinder } from '../scheduler/slots.js';
 
 const P = CONFIG.PROPERTIES;
 
@@ -29,7 +36,7 @@ const P = CONFIG.PROPERTIES;
  */
 export async function handlePreview(env, dateStr, statusOverride = null) {
   const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
   const idempotency = new IdempotencyManager(env.KV);
   const vectorize = new VectorizeManager(env);
@@ -119,6 +126,12 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
       sortedTasks = schedulableTasks; // Proceed without ordering
     }
 
+    // Critical Path Analysis — surface deadline risks without blocking
+    const criticalPath = CriticalPathAnalyzer.calculateCriticalPath(sortedTasks);
+    if (!criticalPath.feasible) {
+      await logger.warn(`Deadline risk: ${criticalPath.message}`);
+    }
+
     // Feasibility Check
     const feasibility = OptimizationEngine.validateFeasibility(sortedTasks);
     if (!feasibility.feasible) {
@@ -144,6 +157,34 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
     const workHours = await context.get('work_hours') || { start: CONFIG.DEFAULTS.WORK_DAY_START, end: CONFIG.DEFAULTS.WORK_DAY_END };
     const userTimezone = await context.get('user_timezone_current');
 
+    // Load bandit slot hints per energy category
+    let slotHints = {};
+    try {
+      const bandits = await BanditManager.loadAll(context);
+      for (const task of sortedTasks) {
+        const energy = (task.energy || 'Moderate').toLowerCase();
+        const bandit = BanditManager.getOrCreate(bandits, energy);
+        slotHints[task.id] = bandit.selectSlot();
+      }
+    } catch { /* non-critical */ }
+
+    // Load learned buffer times
+    let learnedBuffers = {};
+    try {
+      learnedBuffers = JSON.parse(await env.KV.get('learned_buffers') || '{}');
+    } catch { /* non-critical */ }
+
+    // Energy curve peak window
+    let energyPeakHint = '';
+    try {
+      const energyCurve = await context.get('energy_curve') || {};
+      const peak = EnergyCurve.getPeakWindow(energyCurve);
+      if (peak) energyPeakHint = peak.recommendation;
+    } catch { /* non-critical */ }
+
+    // Task batching hints
+    const batchingHints = TaskBatching.getBatchingHints(sortedTasks);
+
     // Build Prompt Context
     const promptContext = {
       date: dateStr,
@@ -157,21 +198,35 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
       fixedAppointments,
       externalCalendarBlocks: externalBlocks,
       availableSlots: [],
-      dependencies: sortedTasks.map(t => t.id)
+      dependencies: sortedTasks.map(t => t.id),
+      slotHints,
+      learnedBuffers,
+      energyPeakHint,
+      batchingHints,
+      deadlineWarnings: criticalPath.feasible ? [] : criticalPath.violations
     };
 
-    const prompt = PromptBuilder.buildPrompt(sortedTasks, promptContext);
+    const promptResult = PromptBuilder.buildPrompt(sortedTasks, promptContext);
+    const prompt = promptResult.prompt;
+    const promptVersion = promptResult.version;
+
+    // Track context size for stats (context_size_avg)
+    try {
+      await env.KV.put('prompt_token_count', String(promptResult.tokenEstimate), { expirationTtl: 604800 });
+    } catch { /* non-critical */ }
 
     // AI Generation with Zod Validation & Retry
     let schedule = null;
     let aiAttempts = 0;
+    let lastRawResponse = null;
     const maxRetries = 3;
 
     while (!schedule && aiAttempts < maxRetries) {
       aiAttempts++;
       try {
-        const aiResult = await env.AI.run('@cf/qwen/qwen2.5-7b-instruct', { prompt });
+        const aiResult = await env.AI.run('@cf/qwen/qwen2.5-7b-instruct', { prompt: prompt });
         const rawResponse = aiResult.response.trim().replace(/```json\n?|```/g, '');
+        lastRawResponse = rawResponse;
         const parsed = JSON.parse(rawResponse);
         const validation = ScheduleResponseSchema.safeParse(parsed);
 
@@ -187,10 +242,14 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
       }
     }
 
-    // Fallback if AI fails
+    // Fallback if AI fails — use SlotFinder for constraint-aware placement
     if (!schedule) {
-      await logger.error('AI failed after 3 attempts, using fallback scheduler');
-      schedule = FallbackScheduler.generate(sortedTasks, workHours.start);
+      const jsonError = new InvalidJSONError(lastRawResponse || '', aiAttempts);
+      await logger.error('AI failed after 3 attempts, using fallback scheduler', {
+        code: jsonError.code,
+        attempts: aiAttempts
+      });
+      schedule = FallbackScheduler.generate(sortedTasks, workHours.start, learnedBuffers);
     }
 
     // Track AI quality metrics
@@ -204,6 +263,25 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
     const writeStatus = statusOverride || CONFIG.STATUS.SCHEDULE.PREVIEW;
     for (const entry of schedule) {
       let version = 1;
+
+      // Build enriched notes: xAI transparency + multi-day visibility + prompt version
+      const noteParts = [];
+      if (entry.notes) noteParts.push(entry.notes);
+      // xAI: surface inferred fields so user knows what the AI decided
+      if (entry.inferred_fields && Object.keys(entry.inferred_fields).length > 0) {
+        const inferences = Object.entries(entry.inferred_fields)
+          .map(([k, v]) => `${k}=${v}`).join(', ');
+        noteParts.push(`[SchedSec: inferred ${inferences}]`);
+      }
+      // Multi-day Day N/M visibility
+      const dayNum = entry.day_number || 1;
+      const parentTask = sortedTasks.find(t => t.id === entry.task_id);
+      if (parentTask && parentTask.estimatedDays && parentTask.estimatedDays > 1) {
+        noteParts.push(`[Day ${dayNum}/${parentTask.estimatedDays}]`);
+      }
+      noteParts.push(`[prompt:${promptVersion}]`);
+      const enrichedNotes = noteParts.join(' ').substring(0, 2000);
+
       try {
         const lock = await OptimisticLock.acquireWrite(notion, env.SCHEDULE_DB_ID, CONFIG, dateStr, entry.task_id);
         version = lock.newVersion;
@@ -213,8 +291,8 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
             [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
             [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
             [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
-            [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: entry.notes || '' } }] },
-            [P.SCHEDULE.DAY_NUMBER]: { number: entry.day_number || 1 },
+            [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
+            [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
             [P.SCHEDULE.VERSION]: { number: version },
             [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
             [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
@@ -233,8 +311,8 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
         [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
         [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
         [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
-        [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: entry.notes || '' } }] },
-        [P.SCHEDULE.DAY_NUMBER]: { number: entry.day_number || 1 },
+        [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
+        [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
         [P.SCHEDULE.VERSION]: { number: version },
         [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
         [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }

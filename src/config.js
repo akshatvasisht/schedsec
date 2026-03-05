@@ -22,7 +22,18 @@ export const CONFIG = {
     WORK_DAY_START: '09:00',
     WORK_DAY_END: '17:00',
     TIMEZONE: 'America/New_York',
-    MAX_REGEN_PER_5MIN: 1
+    MAX_REGEN_PER_5MIN: 1,
+    PROMPT_VERSION: 'v4'
+  },
+
+  // Skip Reason options (for rule extraction filtering)
+  SKIP_REASONS: {
+    DEPRIORITIZED: 'Deprioritized',
+    NO_TIME: 'No Time',
+    EXTERNAL_BLOCKER: 'External Blocker',
+    COMPLETED_EARLIER: 'Completed Earlier',
+    // These reasons should NOT generate learning rules
+    NON_PREFERENCE_REASONS: ['No Time', 'External Blocker']
   },
 
   // Learning System

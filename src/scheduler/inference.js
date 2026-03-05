@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { CollaborativeFilter } from './collaborative-filter.js';
 
 /**
  * Logic for inferring blank task fields (Duration, Energy, Priority).
@@ -9,9 +10,10 @@ export class InferenceEngine {
    * @param task The parameter.
    * @param patterns The parameter.
    * @param rules The parameter.
+   * @param historicalTasks Optional array of historical tasks for collaborative filtering.
    * @returns {any} The return value.
    */
-  static inferFields(task, patterns = {}, rules = []) {
+  static inferFields(task, patterns = {}, rules = [], historicalTasks = []) {
     const inferred = { ...task };
     const fields = ['duration', 'energy', 'priority'];
 
@@ -29,6 +31,15 @@ export class InferenceEngine {
         if (patternMatch) {
           inferred[field] = patternMatch;
           continue;
+        }
+
+        // Step 3.5: Collaborative Filtering (similar task matching)
+        if (historicalTasks.length > 0) {
+          const similar = CollaborativeFilter.inferFromSimilar(inferred, historicalTasks);
+          if (similar[field]) {
+            inferred[field] = similar[field];
+            continue;
+          }
         }
 
         // Step 4: System Defaults

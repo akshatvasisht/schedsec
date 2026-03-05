@@ -30,8 +30,12 @@ export class NotionClient {
         resolve(result);
       } catch (error) {
         if (error.code === 'rate_limited' && retries > 0) {
-          const wait = Math.pow(2, 4 - retries) * 1000;
-          console.warn(`Rate limited, waiting ${wait}ms...`);
+          // Parse Retry-After header if available, else use exponential backoff
+          const retryAfter = error.headers?.['retry-after'];
+          const wait = retryAfter
+            ? parseInt(retryAfter) * 1000
+            : Math.pow(2, 4 - retries) * 1000;
+          console.warn(`Rate limited, waiting ${wait}ms (retry ${4 - retries}/3)...`);
           await new Promise(r => { setTimeout(r, wait); });
           this.requestQueue.unshift({ fn, resolve, reject, retries: retries - 1 });
         } else {
@@ -116,5 +120,20 @@ export class NotionClient {
       page_id: pageId,
       archived: true
     }));
+  }
+
+  /**
+   * Batch update multiple pages sequentially through the queue.
+   * Prevents parallel update storms that trigger rate limits.
+   * @param {Array<{pageId: string, properties: object}>} updates Array of page updates.
+   * @returns {Promise<Array>} Results of each update.
+   */
+  async batchUpdate(updates) {
+    const results = [];
+    for (const { pageId, properties } of updates) {
+      const result = await this.updatePage(pageId, properties);
+      results.push(result);
+    }
+    return results;
   }
 }

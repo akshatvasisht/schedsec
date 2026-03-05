@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { PromptCompressor } from '../learning/prompt-compression.js';
 
 /**
  * Prompt Builder
@@ -12,11 +13,9 @@ export class PromptBuilder {
    */
   static compressRules(rules) {
     if (!rules || rules.length === 0) return 'No historical rules yet.';
-    return rules.map(rule => {
-      const condition = rule.condition.replace('task=', '').replace('day=', '');
-      const action = rule.action.replace('prefer_time=', '').replace('duration=', '');
-      return `${condition} -> ${action}(${rule.confidence.toFixed(2)},${rule.application_count || 0})`;
-    }).join('; ');
+    // Delegate to PromptCompressor for deduplication + token budget
+    const compressed = PromptCompressor.compressLearnedRules(rules, 500);
+    return compressed || 'No historical rules yet.';
   }
 
   /**
@@ -40,9 +39,10 @@ EXAMPLE OUTPUT:
 
   /**
    * Builds the complete prompt for Cloudflare AI (Qwen 2.5 7B).
+   * Returns prompt text, estimated token count, and version.
    * @param tasks The parameter.
    * @param context The parameter.
-   * @returns {any} The return value.
+   * @returns {{ prompt: string, tokenEstimate: number, version: string }} Prompt output.
    */
   static buildPrompt(tasks, context) {
     const {
@@ -54,13 +54,20 @@ EXAMPLE OUTPUT:
       fixedAppointments = [],
       externalCalendarBlocks = [],
       availableSlots = [],
-      dependencies = []
+      dependencies = [],
+      slotHints = {},
+      learnedBuffers = {},
+      energyPeakHint = '',
+      batchingHints = [],
+      deadlineWarnings = []
     } = context;
 
     const compressedRules = this.compressRules(rules);
     const patternsStr = JSON.stringify(patterns);
+    const version = CONFIG.DEFAULTS.PROMPT_VERSION;
 
-    return `You are SchedSec, an autonomous scheduling assistant. Output ONLY valid JSON.
+    const prompt = `You are SchedSec, an autonomous scheduling assistant. Output ONLY valid JSON.
+PROMPT VERSION: ${version}
 
 CURRENT DATE: ${date} (${dayName})
 TIMEZONE: ${timezone}
@@ -91,6 +98,20 @@ ${patternsStr}
 
 HARD CONSTRAINTS:
 ${hardConstraints.length > 0 ? hardConstraints.join('\n') : 'None'}
+
+${Object.keys(slotHints).length > 0 ? `SLOT HINTS (learned optimal time slots per task):
+${Object.entries(slotHints).map(([id, slot]) => `${id}: ${slot}`).join(', ')}` : ''}
+
+${energyPeakHint ? `ENERGY PEAK: ${energyPeakHint}` : ''}
+
+${batchingHints.length > 0 ? `BATCHING HINTS:
+${batchingHints.join('\n')}` : ''}
+
+${Object.keys(learnedBuffers).length > 0 ? `LEARNED BUFFER TIMES (between energy transitions):
+${Object.entries(learnedBuffers).map(([k, v]) => `${k}: ${v.avgBuffer}min (${v.samples} samples)`).join(', ')}` : ''}
+
+${deadlineWarnings.length > 0 ? `DEADLINE WARNINGS:
+${deadlineWarnings.map(w => `⚠️ ${w.task}: needs ${w.needed} days but only ${w.available} available`).join('\n')}` : ''}
 
 MULTI-DAY TASKS:
 For tasks with estimated_days > 1, split duration using energy decay.
@@ -145,5 +166,28 @@ OUTPUT FORMAT (ONLY valid JSON array, no markdown):
 ]
 
 YOUR OUTPUT (JSON ONLY):`;
+
+    // Token overflow protection: progressively drop optional sections
+    const tokenEstimate = Math.ceil(prompt.length / 4);
+    const TOKEN_LIMIT = 6000;
+    let finalPrompt = prompt;
+    let finalTokenEstimate = tokenEstimate;
+
+    if (tokenEstimate > TOKEN_LIMIT) {
+      // Drop sections in priority order until under budget
+      const optionalSections = [
+        { label: 'BATCHING HINTS', regex: /\nBATCHING HINTS:[\s\S]*?(?=\n[A-Z])/m },
+        { label: 'SLOT HINTS', regex: /\nSLOT HINTS:[\s\S]*?(?=\n[A-Z])/m },
+        { label: 'ENERGY PEAK', regex: /\nENERGY PEAK:[\s\S]*?(?=\n[A-Z])/m },
+        { label: 'LEARNED BUFFERS', regex: /\nLEARNED BUFFER TIMES:[\s\S]*?(?=\n[A-Z])/m },
+      ];
+      for (const section of optionalSections) {
+        if (Math.ceil(finalPrompt.length / 4) <= TOKEN_LIMIT) break;
+        finalPrompt = finalPrompt.replace(section.regex, '');
+      }
+      finalTokenEstimate = Math.ceil(finalPrompt.length / 4);
+    }
+
+    return { prompt: finalPrompt, tokenEstimate: finalTokenEstimate, version };
   }
 }

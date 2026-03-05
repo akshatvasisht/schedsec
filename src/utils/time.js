@@ -51,14 +51,6 @@ export function rangesOverlap(start1, duration1, start2, duration2) {
   return s1 < e2 && s2 < e1;
 }
 
-/**
- * Calculates current UTC date in YYYY-MM-DD format.
- * @param date The parameter.
- * @returns {any} The return value.
- */
-export function getISODate(date = new Date()) {
-  return date.toISOString().split('T')[0];
-}
 
 /**
  * Calculates minutes between two HH:MM strings.

@@ -2,18 +2,19 @@ import { NotionClient } from '../notion-client.js';
 import { Logger } from '../logger.js';
 import { ContextManager } from '../context.js';
 import { CONFIG } from '../config.js';
+import { AnomalyDetector } from '../scheduler/anomaly-detection.js';
 
 const P = CONFIG.PROPERTIES;
 
 /**
  * Weekly Stats Aggregator (Triggered Sunday 11:59 PM)
- * Calculates analytics based on completion rate and rule inferences.
+ * Calculates analytics based on completion rate, rule inferences, and streaks.
  * @param env The parameter.
  * @returns {any} The return value.
  */
 export async function handleStats(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
 
   const now = new Date();
@@ -82,8 +83,46 @@ export async function handleStats(env) {
   const ruleLearningRate = qualityMetrics.current_week.rule_learning_rate || 0;
   const jsonFailureRate = parseFloat((qualityMetrics.current_week.json_failure_rate || 0).toFixed(2));
 
-  // Context Size
-  const contextSizeAvg = 0; // Tracked during prompt generation
+  // Context Size — read from KV (tracked during prompt generation)
+  let contextSizeAvg = 0;
+  try {
+    const tokenCount = await env.KV.get('prompt_token_count');
+    contextSizeAvg = tokenCount ? parseInt(tokenCount) : 0;
+  } catch {
+    contextSizeAvg = 0;
+  }
+
+  // Streak tracking — consecutive days with ≥70% completion
+  const dateMap = {};
+  for (const e of entries) {
+    if (!e.date) continue;
+    if (!dateMap[e.date]) dateMap[e.date] = { total: 0, done: 0, hasDeep: false };
+    dateMap[e.date].total++;
+    if (e.status === CONFIG.STATUS.SCHEDULE.DONE) dateMap[e.date].done++;
+    if (e.ai_duration && e.ai_duration >= 90) dateMap[e.date].hasDeep = true;
+  }
+
+  const sortedDates = Object.keys(dateMap).sort().reverse();
+  let completionStreak = 0;
+  let deepWorkStreak = 0;
+  for (const d of sortedDates) {
+    const dayRate = dateMap[d].total > 0 ? dateMap[d].done / dateMap[d].total : 0;
+    if (dayRate >= 0.7) { completionStreak++; } else { break; }
+  }
+  for (const d of sortedDates) {
+    if (dateMap[d].hasDeep && dateMap[d].done > 0) { deepWorkStreak++; } else { break; }
+  }
+
+  // Store streak data in context for prompt visibility
+  const streakData = await context.get('streak_data') || {};
+  streakData.current_completion_streak = completionStreak;
+  streakData.current_deep_work_streak = deepWorkStreak;
+  streakData.longest_completion_streak = Math.max(
+    streakData.longest_completion_streak || 0,
+    completionStreak
+  );
+  streakData.last_updated = now.toISOString().split('T')[0];
+  await context.set('streak_data', streakData, 'Updated by weekly stats');
 
   // Quality Alerts
   const alerts = [];
@@ -102,6 +141,26 @@ export async function handleStats(env) {
     alerts.push({ type: 'LOW_SLOT_ACCEPTANCE', threshold: thresholds.MIN_TIME_SLOT_ACCEPTANCE, actual: timeSlotAcceptance / 100, severity: 'WARNING', message: 'AI time slot suggestions are frequently rejected' });
   }
 
+  // Anomaly Detection — z-score analysis against baseline
+  try {
+    const anomalyBaseline = await context.get('anomaly_baseline') || {
+      avg_edit_rate: aiEditRate, stddev_edit_rate: 0.15,
+      avg_completion_rate: completionRate / 100, stddev_completion_rate: 0.15,
+      avg_conflicts: 0, stddev_conflicts: 1
+    };
+    const scheduleData = { entries, conflicts: [] };
+    const anomalyResult = AnomalyDetector.detectAnomalousSchedule(scheduleData, anomalyBaseline);
+    if (anomalyResult.is_anomalous) {
+      for (const a of anomalyResult.anomalies) {
+        alerts.push({ type: `ANOMALY_${a.metric.toUpperCase()}`, severity: a.severity, actual: a.current, message: `Anomaly: ${a.metric} z-score=${a.z_score}` });
+      }
+    }
+    // Update rolling baseline (simple running mean)
+    anomalyBaseline.avg_edit_rate = (anomalyBaseline.avg_edit_rate * 0.8) + (aiEditRate * 0.2);
+    anomalyBaseline.avg_completion_rate = (anomalyBaseline.avg_completion_rate * 0.8) + ((completionRate / 100) * 0.2);
+    await context.set('anomaly_baseline', anomalyBaseline, 'Updated by weekly stats');
+  } catch { /* non-critical */ }
+
   // Write to Stats DB
   await notion.createPage(env.STATS_DB_ID, {
     [P.STATS.WEEK_OF]: { date: { start: weekAgoStr } },
@@ -119,6 +178,6 @@ export async function handleStats(env) {
     [P.STATS.QUALITY_ALERTS]: { rich_text: [{ text: { content: JSON.stringify(alerts).substring(0, 2000) } }] }
   });
 
-  await logger.info('Weekly stats generated', { completionRate, totalTasks, alerts: alerts.length });
-  return { completionRate, totalTasks, completedTasks, aiEditRate, avgDurationAccuracy, alerts };
+  await logger.info('Weekly stats generated', { completionRate, totalTasks, alerts: alerts.length, completionStreak, deepWorkStreak });
+  return { completionRate, totalTasks, completedTasks, aiEditRate, avgDurationAccuracy, alerts, completionStreak, deepWorkStreak };
 }
