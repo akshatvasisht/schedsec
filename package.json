@@ -7,6 +7,8 @@
   "main": "src/index.js",
   "scripts": {
     "setup": "node scripts/setup.js",
+    "onboard": "node scripts/onboard.js",
+    "configure-times": "node scripts/onboard.js --times-only",
     "verify-schema": "node scripts/verify-schema.js",
     "trigger-urls": "node scripts/generate-trigger-urls.js",
     "dev": "wrangler dev",

@@ -100,3 +100,84 @@ Configure these views in your duplicated databases for optimal usability:
 - **Health Check**: Visit `https://YOUR_WORKER_URL/health` (requires Bearer Auth).
 - **Bootstrap**: Run `POST /bootstrap` with your `WORKER_AUTH_TOKEN` to seed your Context and add example tasks.
 - **Schema**: Run `npm run verify-schema` to confirm your Notion connection is mapped correctly.
+
+---
+
+## 6. Onboarding — Personalise Your Schedule
+
+After deploying and verifying, run the onboarding wizard to configure your scheduling preferences. This is what tells SchedSec *when* to run, *how* you like to work, and what your personal energy and meeting patterns look like.
+
+```bash
+npm run onboard
+```
+
+The wizard asks 11 questions, applies your answers to the Context DB, and automatically updates your cron schedule to match your timezone and preferred times — then offers to deploy immediately.
+
+### What onboarding configures
+
+| Question | Configures |
+|---|---|
+| Deep work time | AI inference: when to schedule Deep energy tasks |
+| Typical meeting length | AI inference: default meeting duration |
+| Lunch time | Hard constraint: lunch block in every schedule |
+| Hours per day | Work window start/end time |
+| Meeting preference | AI inference: morning vs afternoon meetings |
+| **Timezone** | All cron times, schedule timezone label |
+| **Preview schedule time** | Cron trigger: when tomorrow's preview generates |
+| **Final schedule time** | Cron trigger: when today's schedule locks in |
+| Work days | Which days AI generates schedules for |
+| Break style | Buffer time between tasks (Pomodoro / Marathon / Adaptive) |
+| ntfy.sh topic | Push alerts for errors (optional) |
+
+### Changing just your scheduling times
+
+If you move to a new timezone or want to shift your preview/final times without re-doing all preferences:
+
+```bash
+npm run configure-times
+```
+
+This asks only 3 questions (timezone, preview time, final time), patches `wrangler.toml` + `src/index.js`, and offers to redeploy.
+
+> [!IMPORTANT]
+> Cloudflare cron schedules are **static** — they must be deployed to take effect. The wizard will patch your local files and offer to deploy. If you skip the deploy step, run `npm run deploy` manually when ready.
+
+### Re-running onboarding (update preferences)
+
+To update any subset of preferences without clearing what you've learned:
+
+```bash
+npm run onboard          # apply new answers on top of existing
+```
+
+To start completely fresh (clears learned AI patterns and hard constraints):
+
+```bash
+node scripts/onboard.js --reset
+```
+
+### Manual / headless usage
+
+If you prefer curl over the interactive script:
+
+```bash
+curl -X POST https://YOUR_WORKER_URL/onboard \
+  -H "Authorization: Bearer YOUR_WORKER_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deep_work_time": 1,
+    "meeting_length": 1,
+    "lunch_time": 1,
+    "work_hours": 2,
+    "meeting_preference": 0,
+    "timezone": "America/Chicago",
+    "preview_time": "21:30",
+    "final_time": "05:30",
+    "work_days": "Mon,Tue,Wed,Thu,Fri",
+    "buffer_style": 2,
+    "ntfy_topic": ""
+  }'
+```
+
+All option values are **0-indexed** (first option = 0). After a manual call, you'll need to compute the UTC cron strings yourself and update `wrangler.toml` + `src/index.js` manually — or run `npm run configure-times` to have the script handle it.
+

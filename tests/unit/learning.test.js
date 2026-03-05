@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ConfidenceDecay } from '../../src/learning/decay.js';
 import { PatternAnalyzer } from '../../src/learning/patterns.js';
+import { RuleExtractor } from '../../src/learning/rule-extraction.js';
 
 /**
  * Extended Learning * Regression tests for the learning sub-system.
@@ -153,6 +154,53 @@ describe('PatternAnalyzer', () => {
       const result = PatternAnalyzer.extractPatterns(sparse);
       expect(result.time_prefs).toEqual({}); // no final_start = no time pref
       expect(result.duration_ratios).toEqual({}); // no durations = no ratios
+    });
+  });
+});
+
+// ─── RuleExtractor ───────────────────────────────────────────────────────────
+
+describe('RuleExtractor', () => {
+  describe('identifyEdits', () => {
+    it('flags implausible duration changes (> 3x)', () => {
+      const ai = [{ task_id: 't1', task_name: 'Test', start: '09:00', duration: 15 }];
+      const final = [{ task_id: 't1', task_name: 'Test', start: '09:00', duration: 60 }]; // 4x
+      const edits = RuleExtractor.identifyEdits(ai, final);
+      expect(edits.length).toBe(1);
+      expect(edits[0].flagged).toBe('implausible');
+    });
+
+    it('flags implausible duration changes (< 0.2x)', () => {
+      const ai = [{ task_id: 't1', task_name: 'Test', start: '09:00', duration: 60 }];
+      const final = [{ task_id: 't1', task_name: 'Test', start: '09:00', duration: 10 }]; // 0.16x
+      const edits = RuleExtractor.identifyEdits(ai, final);
+      expect(edits[0].flagged).toBe('implausible');
+    });
+
+    it('does not flag normal duration changes', () => {
+      const ai = [{ task_id: 't1', task_name: 'Test', start: '09:00', duration: 60 }];
+      const final = [{ task_id: 't1', task_name: 'Test', start: '09:00', duration: 90 }]; // 1.5x
+      const edits = RuleExtractor.identifyEdits(ai, final);
+      expect(edits[0].flagged).toBeUndefined();
+    });
+  });
+
+  describe('shouldSkipForLearning', () => {
+    it('skips implausible edits', () => {
+      expect(RuleExtractor.shouldSkipForLearning({ flagged: 'implausible' })).toBe(true);
+    });
+
+    it('skips correction-flagged entries', () => {
+      expect(RuleExtractor.shouldSkipForLearning({ task: 'Test' }, { correction_flag: true })).toBe(true);
+    });
+
+    it('skips non-preference skip reasons', () => {
+      const nonPref = ['External Blocker'];
+      expect(RuleExtractor.shouldSkipForLearning({ task: 'Test' }, { skip_reason: 'External Blocker' }, nonPref)).toBe(true);
+    });
+
+    it('does not skip valid edits', () => {
+      expect(RuleExtractor.shouldSkipForLearning({ type: 'DURATION', flagged: undefined }, { skip_reason: 'Completed Earlier' }, ['External Blocker'])).toBe(false);
     });
   });
 });

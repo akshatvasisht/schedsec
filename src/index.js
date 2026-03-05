@@ -5,10 +5,13 @@ import { handleStats } from './workers/stats.js';
 import { handleCleanup } from './workers/cleanup.js';
 import { handleBackup, restoreFromBackup } from './workers/backup.js';
 import { handleHealth } from './workers/health.js';
-import { bootstrapSystem } from './cold-start.js';
+import { handleExport } from './workers/export.js';
+import { handleReset } from './workers/reset.js';
+import { bootstrapSystem } from './bootstrap.js';
 import { OnboardingManager } from './features/onboarding.js';
 import { CalendarBlocks } from './features/calendar-blocks.js';
 import { PlanningManager } from './features/planning.js';
+import { PanicManager } from './features/panic.js';
 import { UndoManager } from './features/undo.js';
 import { NotionClient } from './notion-client.js';
 import { ContextManager } from './context.js';
@@ -109,7 +112,31 @@ export default {
 
         case '/onboard': {
           const body = await request.json();
-          result = await OnboardingManager.applyAnswers(body, context);
+          const resetMode = url.searchParams.get('reset') === 'true';
+          result = await OnboardingManager.applyAnswers(body, context, env.KV, resetMode);
+          break;
+        }
+
+        case '/panic': {
+          if (request.method === 'GET') {
+            const override = await context.get('daily_override');
+            result = { active: !!override, override: override || null };
+          } else if (request.method === 'DELETE') {
+            await context.set('daily_override', null, 'Panic mode cleared');
+            result = { success: true, message: 'Panic mode cleared' };
+          } else {
+            const body = await request.json().catch(() => ({}));
+            const override = body.mode === 'sick'
+              ? PanicManager.getSickModeOverride()
+              : {
+                reason: body.reason || 'Manual override',
+                max_work_hours: body.max_work_hours || 4,
+                energy_filter: body.energy_filter || null,
+                priority_filter: body.priority_filter || null
+              };
+            await context.set('daily_override', override, `Panic mode: ${override.reason}`);
+            result = { success: true, override };
+          }
           break;
         }
 
@@ -145,7 +172,55 @@ export default {
               status: 400, headers: { 'Content-Type': 'application/json' }
             });
           }
-          result = await restoreFromBackup(env, body.date);
+          const scope = body.scope || 'all';
+          result = await restoreFromBackup(env, body.date, scope);
+          break;
+        }
+
+        case '/export': {
+          const params = {
+            days: url.searchParams.get('days') || '30',
+            format: url.searchParams.get('format') || 'csv'
+          };
+          const exportResult = await handleExport(env, params);
+          if (exportResult.csv) {
+            return new Response(exportResult.csv, {
+              headers: {
+                'Content-Type': 'text/csv',
+                'Content-Disposition': `attachment; filename="${exportResult.filename}"`
+              }
+            });
+          }
+          result = exportResult;
+          break;
+        }
+
+        case '/reset': {
+          if (request.method !== 'POST') {
+            return new Response(JSON.stringify({ error: 'POST required' }), {
+              status: 405, headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          const body = await request.json().catch(() => ({}));
+          result = await handleReset(env, body);
+          break;
+        }
+
+        case '/webhook': {
+          if (request.method !== 'POST') {
+            return new Response(JSON.stringify({ error: 'POST required' }), {
+              status: 405, headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          // Rate-limit: max 1 regen per 30min
+          const cooldownKey = `regen_cooldown_${today}`;
+          const cooldown = await env.KV.get(cooldownKey);
+          if (cooldown) {
+            result = { success: false, message: 'Regeneration cooldown active (30 min)' };
+          } else {
+            await env.KV.put(cooldownKey, 'active', { expirationTtl: 1800 });
+            result = await handleRegenerate(env, today);
+          }
           break;
         }
 
@@ -173,28 +248,23 @@ export default {
   async scheduled(event, env, _ctx) {
     const today = new Date().toISOString().split('T')[0];
     const notion = new NotionClient(env.NOTION_API_KEY);
-    const logger = new Logger(notion, env.LOGS_DB_ID);
+    const logger = new Logger(notion, env.LOGS_DB_ID, env);
 
     try {
-      switch (event.cron) {
-        case '30 1 * * *':   // 9:30 PM EST = 1:30 AM UTC (Preview)
-          await handlePreview(env, today);
-          break;
-        case '30 9 * * *':   // 5:30 AM EST = 9:30 AM UTC (Final)
-          await handleFinal(env, today);
-          break;
-        case '59 23 * * 0':  // Sunday 11:59 PM (Stats)
-          await handleStats(env);
-          break;
-        case '0 0 1 * *':    // 1st of month (Cleanup)
-          await handleCleanup(env);
-          break;
-        case '0 2 * * *':    // 2 AM daily (Backup)
-          await handleBackup(env);
-          break;
-        case '0 3 * * 1':    // Monday 3 AM (Health)
-          await handleHealth(env);
-          break;
+      if (event.cron === env.CRON_PREVIEW) {
+        await handlePreview(env, today);
+      } else if (event.cron === env.CRON_FINAL) {
+        await handleFinal(env, today);
+      } else if (event.cron === env.CRON_STATS) {
+        await handleStats(env);
+      } else if (event.cron === env.CRON_CLEANUP) {
+        await handleCleanup(env);
+      } else if (event.cron === env.CRON_BACKUP) {
+        await handleBackup(env);
+      } else if (event.cron === env.CRON_HEALTH) {
+        await handleHealth(env);
+      } else {
+        await logger.warn(`Unrecognized cron trigger: ${event.cron}`);
       }
     } catch (error) {
       await logger.error(`Cron failed: ${event.cron}`, { error: error.message, stack: error.stack });

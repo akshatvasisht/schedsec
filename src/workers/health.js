@@ -11,7 +11,7 @@ import { CONFIG } from '../config.js';
  */
 export async function handleHealth(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
 
   const results = {
@@ -44,13 +44,18 @@ export async function handleHealth(env) {
 
   // R2 — check most recent backup exists and is < 25 hours old
   try {
-    const listing = await env.R2_BUCKET.list({ prefix: 'backup_daily_', limit: 1 });
+    const listing = await env.R2_BUCKET.list({ prefix: 'backup_daily_' });
     if (listing.objects.length > 0) {
-      const uploaded = listing.objects[0].uploaded;
-      const ageHours = (Date.now() - new Date(uploaded).getTime()) / (1000 * 60 * 60);
-      results.r2_backup = ageHours < 25;
+      // Sort by key (lexicographic = chronological for ISO dates) to get latest
+      const sorted = listing.objects.sort((a, b) => b.key.localeCompare(a.key));
+      const latestKey = sorted[0].key;
+      // Parse date from key: backup_daily_YYYY-MM-DD.json
+      const keyDate = latestKey.replace('backup_daily_', '').replace('.json', '');
+      const backupDate = new Date(keyDate + 'T00:00:00Z');
+      const ageHours = (Date.now() - backupDate.getTime()) / (1000 * 60 * 60);
+      results.r2_backup = ageHours < 49; // allow up to ~2 days for weekend gaps
       if (!results.r2_backup) {
-        await logger.warn('HealthCheck: Backup is stale', { ageHours: Math.round(ageHours) });
+        await logger.warn('HealthCheck: Backup is stale', { ageHours: Math.round(ageHours), latestKey });
       }
 
       // Backup integrity verification (dry-run restore)

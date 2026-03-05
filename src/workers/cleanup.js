@@ -3,7 +3,7 @@ import { Logger } from '../logger.js';
 import { ContextManager } from '../context.js';
 import { PatternAnalyzer } from '../learning/patterns.js';
 import { ConfidenceDecay } from '../learning/decay.js';
-import { cleanupBootstrapData } from '../cold-start.js';
+import { cleanupBootstrapData } from '../bootstrap.js';
 import { CONFIG } from '../config.js';
 
 const P = CONFIG.PROPERTIES;
@@ -16,7 +16,7 @@ const P = CONFIG.PROPERTIES;
  */
 export async function handleCleanup(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
 
   const now = new Date();

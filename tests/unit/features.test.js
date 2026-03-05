@@ -4,7 +4,210 @@ import { EnergyCurve } from '../../src/features/energy-curve.js';
 import { TaskBatching } from '../../src/features/task-batching.js';
 import { PlanningManager } from '../../src/features/planning.js';
 import { UndoManager } from '../../src/features/undo.js';
+import { OnboardingManager } from '../../src/features/onboarding.js';
+import { PanicManager } from '../../src/features/panic.js';
 import { validateTriggerToken, generateTriggerToken } from '../../src/trigger.js';
+
+// ── OnboardingManager ─────────────────────────────────────────────────────────
+
+/**
+ * Build a minimal mock ContextManager.
+ * @param {object} initial - Initial store values.
+ * @returns {object} Mock context with get/set/store.
+ */
+function mockContext(initial = {}) {
+  const store = { ...initial };
+  return {
+    get: vi.fn(async (key) => store[key] ?? null),
+    set: vi.fn(async (key, value) => { store[key] = value; }),
+    _store: store
+  };
+}
+
+/**
+ * Build a minimal mock KV binding.
+ * @returns {object} Mock KV with get/put/store.
+ */
+function mockKv() {
+  const store = {};
+  return {
+    get: vi.fn(async (key) => store[key] ?? null),
+    put: vi.fn(async (key, value) => { store[key] = value; }),
+    _store: store
+  };
+}
+
+describe('OnboardingManager', () => {
+  describe('applyAnswers — preference questions', () => {
+    it('maps deep_work_time 0 → Morning, 2 → Afternoon', async () => {
+      const ctx = mockContext();
+      await OnboardingManager.applyAnswers({ deep_work_time: 0 }, ctx);
+      expect(ctx._store['inference_patterns_v2'].deep_work.time_preference).toBe('Morning');
+
+      const ctx2 = mockContext();
+      await OnboardingManager.applyAnswers({ deep_work_time: 2 }, ctx2);
+      expect(ctx2._store['inference_patterns_v2'].deep_work.time_preference).toBe('Afternoon');
+    });
+
+    it('maps meeting_length 0 → 25min, 3 → 90min', async () => {
+      const ctx = mockContext();
+      await OnboardingManager.applyAnswers({ meeting_length: 0 }, ctx);
+      expect(ctx._store['inference_patterns_v2'].meeting.duration).toBe(25);
+
+      const ctx2 = mockContext();
+      await OnboardingManager.applyAnswers({ meeting_length: 3 }, ctx2);
+      expect(ctx2._store['inference_patterns_v2'].meeting.duration).toBe(90);
+    });
+
+    it('sets lunch hard constraint', async () => {
+      const ctx = mockContext({ hard_constraints: [] });
+      await OnboardingManager.applyAnswers({ lunch_time: 1 }, ctx);
+      expect(ctx._store['hard_constraints']).toContain('lunch_12:00-13:00');
+    });
+
+    it('skips lunch constraint when lunch_time === 3 (skip lunch)', async () => {
+      const ctx = mockContext({ hard_constraints: [] });
+      await OnboardingManager.applyAnswers({ lunch_time: 3 }, ctx);
+      const stored = ctx._store['hard_constraints'];
+      expect(!stored || stored.length === 0 || !stored.some(c => c.startsWith('lunch_'))).toBe(true);
+    });
+
+    it('maps work_hours 0 → 9-13:00, 2 → 9-17:00', async () => {
+      const ctx = mockContext();
+      await OnboardingManager.applyAnswers({ work_hours: 0 }, ctx);
+      expect(ctx._store['work_hours']).toEqual({ start: '09:00', end: '13:00' });
+
+      const ctx2 = mockContext();
+      await OnboardingManager.applyAnswers({ work_hours: 2 }, ctx2);
+      expect(ctx2._store['work_hours']).toEqual({ start: '09:00', end: '17:00' });
+    });
+
+    it('maps meeting_preference 0 → Morning, 2 → Anytime', async () => {
+      const ctx = mockContext();
+      await OnboardingManager.applyAnswers({ meeting_preference: 0 }, ctx);
+      expect(ctx._store['inference_patterns_v2'].meeting.time_preference).toBe('Morning');
+
+      const ctx2 = mockContext();
+      await OnboardingManager.applyAnswers({ meeting_preference: 2 }, ctx2);
+      expect(ctx2._store['inference_patterns_v2'].meeting.time_preference).toBe('Anytime');
+    });
+  });
+
+  describe('applyAnswers — new questions', () => {
+    it('writes timezone to context + KV', async () => {
+      const ctx = mockContext();
+      const kv = mockKv();
+      await OnboardingManager.applyAnswers({ timezone: 'America/Chicago' }, ctx, kv);
+      expect(ctx._store['user_timezone_current'].current).toBe('America/Chicago');
+      expect(kv._store['sched_timezone']).toBe('America/Chicago');
+    });
+
+    it('writes valid preview_time to KV', async () => {
+      const ctx = mockContext();
+      const kv = mockKv();
+      await OnboardingManager.applyAnswers({ preview_time: '21:30' }, ctx, kv);
+      expect(kv._store['sched_preview_time']).toBe('21:30');
+    });
+
+    it('throws on invalid preview_time format', async () => {
+      const ctx = mockContext();
+      const kv = mockKv();
+      await expect(
+        OnboardingManager.applyAnswers({ preview_time: '9:30pm' }, ctx, kv)
+      ).rejects.toThrow('Invalid preview_time format');
+    });
+
+    it('writes valid final_time to KV', async () => {
+      const ctx = mockContext();
+      const kv = mockKv();
+      await OnboardingManager.applyAnswers({ final_time: '05:30' }, ctx, kv);
+      expect(kv._store['sched_final_time']).toBe('05:30');
+    });
+
+    it('throws on invalid final_time', async () => {
+      const ctx = mockContext();
+      await expect(
+        OnboardingManager.applyAnswers({ final_time: '25:00' }, ctx)
+      ).rejects.toThrow('Invalid final_time format');
+    });
+
+    it('maps work_days string to full day names', async () => {
+      const ctx = mockContext();
+      await OnboardingManager.applyAnswers({ work_days: 'Mon,Wed,Fri' }, ctx);
+      expect(ctx._store['work_days']).toEqual(['Monday', 'Wednesday', 'Friday']);
+    });
+
+    it('maps buffer_style 0 → pomodoro, 1 → marathon, 2 → adaptive', async () => {
+      for (const [idx, name] of [[0, 'pomodoro'], [1, 'marathon'], [2, 'adaptive']]) {
+        const ctx = mockContext();
+        await OnboardingManager.applyAnswers({ buffer_style: idx }, ctx);
+        expect(ctx._store['buffer_style'].name).toBe(name);
+      }
+    });
+
+    it('writes ntfy_topic to KV when provided', async () => {
+      const ctx = mockContext();
+      const kv = mockKv();
+      await OnboardingManager.applyAnswers({ ntfy_topic: 'my-schedsec-alerts' }, ctx, kv);
+      expect(kv._store['ntfy_topic']).toBe('my-schedsec-alerts');
+    });
+  });
+
+  describe('partial updates', () => {
+    it('only updates provided keys, leaves others intact', async () => {
+      const ctx = mockContext({
+        inference_patterns_v2: { deep_work: { time_preference: 'Evening', duration: 120 } },
+        work_hours: { start: '08:00', end: '18:00' }
+      });
+      await OnboardingManager.applyAnswers({ meeting_length: 1 }, ctx);
+      // deep_work should be unchanged
+      expect(ctx._store['inference_patterns_v2'].deep_work.time_preference).toBe('Evening');
+      // meeting should now have duration
+      expect(ctx._store['inference_patterns_v2'].meeting.duration).toBe(45);
+      // work_hours untouched
+      expect(ctx._store['work_hours']).toEqual({ start: '08:00', end: '18:00' });
+    });
+  });
+
+  describe('reset mode', () => {
+    it('clears inference_patterns_v2 before applying', async () => {
+      const ctx = mockContext({
+        inference_patterns_v2: { custom_rule: { confidence: 0.9 } }
+      });
+      await OnboardingManager.applyAnswers({ deep_work_time: 0 }, ctx, null, true);
+      // Should only have deep_work from fresh apply, not the old custom_rule
+      expect(ctx._store['inference_patterns_v2'].custom_rule).toBeUndefined();
+      expect(ctx._store['inference_patterns_v2'].deep_work).toBeDefined();
+    });
+
+    it('returns reset: true in result', async () => {
+      const ctx = mockContext();
+      const result = await OnboardingManager.applyAnswers({}, ctx, null, true);
+      expect(result.reset).toBe(true);
+    });
+  });
+
+  describe('isValidTime', () => {
+    it('accepts valid 24h times', () => {
+      expect(OnboardingManager.isValidTime('00:00')).toBe(true);
+      expect(OnboardingManager.isValidTime('21:30')).toBe(true);
+      expect(OnboardingManager.isValidTime('23:59')).toBe(true);
+    });
+
+    it('rejects out-of-range times', () => {
+      expect(OnboardingManager.isValidTime('24:00')).toBe(false);
+      expect(OnboardingManager.isValidTime('21:60')).toBe(false);
+    });
+
+    it('rejects wrong format', () => {
+      expect(OnboardingManager.isValidTime('9:30')).toBe(false);
+      expect(OnboardingManager.isValidTime('9:30pm')).toBe(false);
+      expect(OnboardingManager.isValidTime('')).toBe(false);
+    });
+  });
+});
+
+
 
 /**
  * Extended * Core regression suite for smart features.
@@ -351,5 +554,38 @@ describe('Trigger token', () => {
   it('validateTriggerToken rejects empty secret', async () => {
     const valid = await validateTriggerToken('regenerate', '2026-03-01', 'abc', '');
     expect(valid).toBe(false);
+  });
+});
+
+// ── PanicManager ─────────────────────────────────────────────────────────────
+
+describe('PanicManager', () => {
+  describe('applyOverrides', () => {
+    const tasks = [
+      { id: '1', name: 'Meeting', energy: 'Light', priority: 'High', duration: 60 },
+      { id: '2', name: 'Deep Work', energy: 'Deep', priority: 'High', duration: 120 },
+      { id: '3', name: 'Admin', energy: 'Light', priority: 'Low', duration: 30 }
+    ];
+
+    it('returns original tasks if no override', () => {
+      expect(PanicManager.applyOverrides(tasks, null)).toEqual(tasks);
+    });
+
+    it('filters by energy and priority', () => {
+      const filtered = PanicManager.applyOverrides(tasks, {
+        energy_filter: ['Light'], priority_filter: ['High']
+      });
+      expect(filtered.length).toBe(1);
+      expect(filtered[0].id).toBe('1');
+    });
+
+    it('enforces max_work_hours by dropping overflowing tasks', () => {
+      // 120 mins max = 2 hours.
+      const override = { max_work_hours: 2 };
+      // task 1 (60), task 2 (120 - drops because total 180 > 120), task 3 (30 - added, total 90 <= 120)
+      const filtered = PanicManager.applyOverrides(tasks, override);
+      expect(filtered.length).toBe(2);
+      expect(filtered.map(t => t.id)).toEqual(['1', '3']);
+    });
   });
 });

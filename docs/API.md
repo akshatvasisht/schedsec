@@ -18,12 +18,12 @@ Authorization: Bearer <your_secure_random_string>
 ## Core Operational Endpoints
 
 ### `GET /preview`
-**Description:** Manually triggers the Preview Generator worker to draft the upcoming day's schedule. Normally triggered via Cron at 9:30 PM EST.
+**Description:** Manually triggers the Preview Generator worker to draft the upcoming day's schedule. Normally triggered via Cron (configured by `npm run onboard`).
 * **Parameters:** None
 * **Returns:** `{ "success": true, "count": 12, "aiAttempts": 1 }`
 
 ### `GET /final`
-**Description:** Manually triggers the Final Generator worker. Learns from manual Notion edits and finalizes today's timeline. Normally triggered via Cron at 5:30 AM EST.
+**Description:** Manually triggers the Final Generator worker. Learns from manual Notion edits and finalizes today's timeline. Normally triggered via Cron (configured by `npm run onboard`).
 * **Parameters:** None
 * **Returns:** `{ "success": true, "learned_rules": 2, "edits": 2 }`
 

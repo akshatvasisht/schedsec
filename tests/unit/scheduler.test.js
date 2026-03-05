@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { UrgencyCalculator } from '../../src/scheduler/urgency.js';
 import { FallbackScheduler } from '../../src/scheduler/fallback.js';
 import { BackgroundTaskManager } from '../../src/scheduler/background.js';
-import { TaskManager } from '../../src/scheduler/task-types.js';
+import { TaskManager } from '../../src/scheduler/task-manager.js';
 import { RecurrenceManager } from '../../src/scheduler/recurrence.js';
-import { MLIntelligence } from '../../src/scheduler/ml-intelligence.js';
+import { MLIntelligence } from '../../src/scheduler/duration-learning.js';
 
 /**
  * Extended Scheduler Tests — Docs-Driven
@@ -234,8 +234,8 @@ describe('RecurrenceManager', () => {
     });
 
     it('generates for matching weekday', () => {
-      // new Date('2026-02-26') resolves to Wednesday in US timezones (UTC midnight shift)
-      const task = { ...baseTask, recurrence: 'Wednesday' };
+      // 2026-02-26 resolves to Thursday correctly now that the timezone bug is fixed
+      const task = { ...baseTask, recurrence: 'Thursday' };
       expect(RecurrenceManager.shouldGenerate(task, '2026-02-26')).toBe(true);
     });
 
@@ -268,6 +268,33 @@ describe('RecurrenceManager', () => {
     it('returns false if no recurrence set', () => {
       const task = { ...baseTask, recurrence: null };
       expect(RecurrenceManager.shouldGenerate(task, '2026-02-26')).toBe(false);
+    });
+
+    it('generates Biweekly on even epoch weeks', () => {
+      const task = { ...baseTask, recurrence: 'Biweekly-Thursday' };
+      // 2026-02-26 is a Thursday. Need to see if it's an even week since epoch
+      // 1729862400000 / 604800000 = 2860 (even)
+      expect(RecurrenceManager.shouldGenerate(task, '2026-02-26')).toBe(true);
+      // 2026-03-05 is a Thursday (odd week)
+      expect(RecurrenceManager.shouldGenerate(task, '2026-03-05')).toBe(false);
+    });
+
+    it('generates Every-N-Days based on last_generated', () => {
+      const task = { ...baseTask, recurrence: 'Every-3-Days', last_generated: '2026-02-23' };
+      // Exactly 3 days later
+      expect(RecurrenceManager.shouldGenerate(task, '2026-02-26')).toBe(true);
+
+      const earlyTask = { ...baseTask, recurrence: 'Every-3-Days', last_generated: '2026-02-24' };
+      expect(RecurrenceManager.shouldGenerate(earlyTask, '2026-02-26')).toBe(false);
+    });
+
+    it('generates Nth-weekday of month', () => {
+      // 2026-02-26 is the 4th Thursday of Feb 2026
+      const task = { ...baseTask, recurrence: '4th-Thursday' };
+      expect(RecurrenceManager.shouldGenerate(task, '2026-02-26')).toBe(true);
+
+      const notYetTask = { ...baseTask, recurrence: '1st-Thursday' };
+      expect(RecurrenceManager.shouldGenerate(notYetTask, '2026-02-26')).toBe(false);
     });
 
     it('returns false for non-Active tasks', () => {

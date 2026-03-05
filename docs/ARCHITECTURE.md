@@ -45,12 +45,12 @@ SchedSec uses a **Three-Layer Serverless Architecture**:
 
 ### The Daily Pipeline (Preview & Final)
 1.  **Input:** User adds tasks to the Notion Inputs DB.
-2.  **Preview (9:30 PM):**
+2.  **Preview (user-configured, e.g. 9:30 PM local):**
     *   `preview.js` fetches active tasks.
     *   Algorithmic resolving: Recurrence processing, multi-day splitting, dependency topological sort.
     *   AI Generation: Semantic search retrieves rules. AI maps tasks to time slots via prompt engineering.
     *   Output: Draft schedule written to Notion Schedule DB (Status: Preview).
-3.  **Final (5:30 AM):**
+3.  **Final (user-configured, e.g. 5:30 AM local):**
     *   `final.js` reads the Schedule DB.
     *   Compares `AI_Start` vs `Final_Start` (user edits).
     *   Extracts rules from edits, updates EMA models, creates an Undo snapshot in KV.
