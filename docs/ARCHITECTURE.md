@@ -56,6 +56,22 @@ SchedSec uses a **Three-Layer Serverless Architecture**:
     *   Extracts rules from edits, updates EMA models, creates an Undo snapshot in KV.
     *   Output: Finalizes schedule (Status: Scheduled).
 
+## Deterministic Algorithms (Constraint Solvers)
+
+SchedSec relies heavily on purely deterministic math and graph theory both before and after the LLM semantic placement:
+
+1. **Cycle Detection (Topological Sort)**
+   The `DependencyResolver` converts the daily task workload into a Directed Acyclic Graph (DAG). It uses Kahn's algorithm to detect circular dependencies (e.g., Task A → Task B → Task A) and throws a deterministic `DependencyCycleError` before the AI is ever called, preventing infinite generation loops.
+   
+2. **Energy Budgeting & Capacity Splitting**
+   The optimization engine calculates the total minutes requested against user-defined energy caps (Deep, Moderate, Light). If a user requests 8 hours of Deep work but configures their maximum threshold at 4 hours, the `MultiDayScheduler` mathematically slices the remainder and pushes low-priority overflow tasks to tomorrow.
+
+3. **1D Bin Packing (Slot Finding)**
+   Finding available free time blocks between fixed meetings is treated as a 1D bin-packing problem. The `SlotFinder` mathematically slices the user's working hours around fixed meetings (e.g., lunch bounds, external appointments), outputting a discrete array of `availableSlots` for the AI to choose from. This guarantees the LLM physically cannot double-book a fixed appointment.
+
+4. **Buffer Math & Transition Times**
+   Inter-task transition gaps are determined programmatically based on learned historical buffers (`BufferLearning`), user preferences (Pomodoro vs Marathon), and mathematical minimums. The AI does not guess how long a break should be.
+
 ## Design Constraints & Trade-offs
 
 * **Decision:** Hybrid AI + Algorithmic approach (AI for placement, Algorithms for constraint checking).

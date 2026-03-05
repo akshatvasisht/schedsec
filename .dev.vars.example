@@ -8,5 +8,9 @@ CONTEXT_DB_ID=your_context_database_id
 LOGS_DB_ID=your_logs_database_id
 STATS_DB_ID=your_stats_database_id
 
-# Worker Authentication
+# Worker Authentication & Security
 WORKER_AUTH_TOKEN=generate_a_secure_random_token_here
+BUTTON_SECRET=generate_another_random_token_here
+
+# Notifications (Optional)
+NTFY_TOPIC=your_ntfy_sh_topic_name_here

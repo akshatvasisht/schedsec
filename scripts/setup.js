@@ -2,126 +2,162 @@
 
 /**
  * SchedSec Interactive Setup Script
- * Automates the provisioning of Cloudflare infrastructure (KV, D1, R2, Vectorize)
- * and injects the generated IDs into wrangler.toml.
+ * Provisions Cloudflare infrastructure (KV, D1, R2, Vectorize), injects IDs
+ * into wrangler.toml, prompts for Notion credentials, writes .dev.vars, and
+ * optionally pushes secrets to production.
  */
 
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { createInterface } from 'readline';
+import { randomBytes } from 'crypto';
 import { join } from 'path';
 
 const WRANGLER_PATH = join(process.cwd(), 'wrangler.toml');
 const DEV_VARS_PATH = join(process.cwd(), '.dev.vars');
 
-console.log('Starting SchedSec Automated Setup...\n');
+// --- Prompt Helper ---
+const rl = createInterface({ input: process.stdin, output: process.stdout });
+const prompt = (q) => new Promise(resolve => rl.question(q, resolve));
 
-// 1. Check dependencies
-try {
-  console.log('Checking for Wrangler CLI...');
-  execSync('npx wrangler --version', { stdio: 'ignore' });
-} catch {
-  console.error('Cloudflare Wrangler is not installed or accessible.');
-  console.error('Please run `npm install` first.');
-  process.exit(1);
-}
-
-if (!existsSync(WRANGLER_PATH)) {
-  console.error('wrangler.toml not found in the current directory.');
-  process.exit(1);
-}
-
-let tomlContent = readFileSync(WRANGLER_PATH, 'utf-8');
-
-// Helper to run wrangler commands and capture output
+// --- Wrangler Runner ---
 function runWrangler(command) {
   try {
     return execSync(`npx wrangler ${command}`, { encoding: 'utf-8' }).trim();
   } catch (e) {
-    if (e.stdout && e.stdout.includes('already exists')) {
-      return 'ALREADY_EXISTS';
-    }
-    console.error(`\nFailed to execute: npx wrangler ${command}`);
+    if (e.stdout && e.stdout.includes('already exists')) return 'ALREADY_EXISTS';
+    console.error(`\nFailed: npx wrangler ${command}`);
     console.error(e.stderr || e.message);
     process.exit(1);
   }
 }
 
-// 2. Provision Infrastructure
-console.log('\nProvisioning Cloudflare Infrastructure (this may take a minute)...\n');
+// --- Token Generator ---
+function generateToken() {
+  return `schedsec_${randomBytes(24).toString('hex')}`;
+}
 
-// KV Namespace
+console.log('\nSchedSec Setup\n--------------');
+
+// 1. Check Wrangler
+try {
+  execSync('npx wrangler --version', { stdio: 'ignore' });
+} catch {
+  console.error('Wrangler not found. Run `npm install` first.');
+  process.exit(1);
+}
+
+if (!existsSync(WRANGLER_PATH)) {
+  console.error('wrangler.toml not found.');
+  process.exit(1);
+}
+
+let tomlContent = readFileSync(WRANGLER_PATH, 'utf-8');
+
+// 2. Provision Infrastructure
+console.log('\nProvisioning Cloudflare infrastructure...\n');
+
 console.log('-> Creating KV Namespace (schedsec-store)...');
 const kvOutput = runWrangler('kv:namespace create "schedsec-store"');
 let kvId = '';
 if (kvOutput !== 'ALREADY_EXISTS') {
-  const idMatch = kvOutput.match(/id = "([a-f0-9]+)"/);
-  if (idMatch) kvId = idMatch[1];
+  const m = kvOutput.match(/id = "([a-f0-9]+)"/);
+  if (m) kvId = m[1];
 } else {
-  console.log('   (KV already exists. If you need the ID, check your Cloudflare Dashboard.)');
+  console.log('   (Already exists — check Cloudflare Dashboard for ID)');
 }
 
-// R2 Bucket
 console.log('-> Creating R2 Bucket (schedsec-backups)...');
 runWrangler('r2 bucket create "schedsec-backups"');
 
-// D1 Database
 console.log('-> Creating D1 Database (schedsec-cache)...');
 const d1Output = runWrangler('d1 create "schedsec-cache"');
 let d1Id = '';
 if (d1Output !== 'ALREADY_EXISTS') {
-  const idMatch = d1Output.match(/database_id = "([a-f0-9-]+)"/);
-  if (idMatch) d1Id = idMatch[1];
+  const m = d1Output.match(/database_id = "([a-f0-9-]+)"/);
+  if (m) d1Id = m[1];
 } else {
-  console.log('   (D1 Database already exists.)');
+  console.log('   (Already exists — check Cloudflare Dashboard for ID)');
 }
 
-// Vectorize Index
-console.log('-> Creating Vectorize Index (schedsec-learned-rules) (dimensions: 768)...');
-runWrangler('vectorize create "schedsec-learned-rules" --dimensions=768 --metric=cosine');
-
+// bge-small-en outputs 384-dimensional vectors
+console.log('-> Creating Vectorize Index (schedsec-learned-rules, 384 dims)...');
+runWrangler('vectorize create "schedsec-learned-rules" --dimensions=384 --metric=cosine');
 
 // 3. Inject IDs into wrangler.toml
-console.log('\n Updating wrangler.toml...');
-
 if (kvId) {
-  // Replace the dummy KV namespace ID in wrangler.toml
   tomlContent = tomlContent.replace(
     /\[\[kv_namespaces\]\]\nbinding = "KV"\nid = "[^"]+"/,
     `[[kv_namespaces]]\nbinding = "KV"\nid = "${kvId}"`
   );
 }
-
 if (d1Id) {
-  // Replace the dummy D1 database ID in wrangler.toml
   tomlContent = tomlContent.replace(
     /\[\[d1_databases\]\]\nbinding = "DB"\ndatabase_name = "schedsec-cache"\ndatabase_id = "[^"]+"/,
     `[[d1_databases]]\nbinding = "DB"\ndatabase_name = "schedsec-cache"\ndatabase_id = "${d1Id}"`
   );
 }
-
 writeFileSync(WRANGLER_PATH, tomlContent);
-console.log('wrangler.toml updated successfully.');
+console.log('\nwrangler.toml updated.');
 
-// 4. Create .dev.vars if it doesn't exist
-if (!existsSync(DEV_VARS_PATH)) {
-  console.log('\nGenerating blank .dev.vars file...');
-  const devVarsContent = `NOTION_API_KEY=""
-INPUTS_DB_ID=""
-SCHEDULE_DB_ID=""
-CONTEXT_DB_ID=""
-LOGS_DB_ID=""
-STATS_DB_ID=""
-WORKER_AUTH_TOKEN="${Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)}"
-BUTTON_SECRET="${Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)}"
-NTFY_TOPIC=""
+// 4. Prompt for Notion Credentials
+console.log('\nNotion Setup');
+console.log('  Duplicate the template at: https://mirage-earth-76c.notion.site/SchedSec-Dashboard-317c470f750180dd98d1fcbd34266400');
+console.log('  Then create an Internal Integration at: https://www.notion.so/my-integrations\n');
+
+const notionKey = await prompt('Notion API Key (secret_...): ');
+const inputsDbId = await prompt('Inputs DB ID: ');
+const scheduleDbId = await prompt('Schedule DB ID: ');
+const contextDbId = await prompt('Context DB ID: ');
+const logsDbId = await prompt('Logs DB ID: ');
+const statsDbId = await prompt('Stats DB ID: ');
+const ntfyTopic = await prompt('ntfy.sh topic for alerts (leave blank to skip): ');
+
+const authToken = generateToken();
+const buttonSecret = generateToken();
+
+// 5. Write .dev.vars
+const devVarsContent = `NOTION_API_KEY="${notionKey}"
+INPUTS_DB_ID="${inputsDbId}"
+SCHEDULE_DB_ID="${scheduleDbId}"
+CONTEXT_DB_ID="${contextDbId}"
+LOGS_DB_ID="${logsDbId}"
+STATS_DB_ID="${statsDbId}"
+WORKER_AUTH_TOKEN="${authToken}"
+BUTTON_SECRET="${buttonSecret}"
+NTFY_TOPIC="${ntfyTopic}"
 `;
-  writeFileSync(DEV_VARS_PATH, devVarsContent);
-  console.log('.dev.vars created. Remember to fill in your Notion credentials!');
+writeFileSync(DEV_VARS_PATH, devVarsContent);
+console.log('\n.dev.vars written.');
+console.log(`WORKER_AUTH_TOKEN: ${authToken}`);
+console.log(`BUTTON_SECRET:     ${buttonSecret}`);
+console.log('(Save these — you will need them for your Notion buttons)\n');
+
+// 6. Optionally push secrets to Cloudflare production
+const pushNow = await prompt('Push secrets to Cloudflare now? (y/N): ');
+if (pushNow.trim().toLowerCase() === 'y') {
+  const secrets = {
+    NOTION_API_KEY: notionKey,
+    INPUTS_DB_ID: inputsDbId,
+    SCHEDULE_DB_ID: scheduleDbId,
+    CONTEXT_DB_ID: contextDbId,
+    LOGS_DB_ID: logsDbId,
+    STATS_DB_ID: statsDbId,
+    WORKER_AUTH_TOKEN: authToken,
+    BUTTON_SECRET: buttonSecret,
+    ...(ntfyTopic ? { NTFY_TOPIC: ntfyTopic } : {})
+  };
+  for (const [key, value] of Object.entries(secrets)) {
+    console.log(`  Pushing ${key}...`);
+    execSync(`echo "${value}" | npx wrangler secret put ${key}`, { stdio: 'inherit' });
+  }
+  console.log('\nAll secrets pushed.');
+
+  const deployNow = await prompt('Deploy to Cloudflare now? (y/N): ');
+  if (deployNow.trim().toLowerCase() === 'y') {
+    execSync('npx wrangler deploy', { stdio: 'inherit' });
+  }
 }
 
-console.log('\nCloudflare infrastructure setup complete!\n');
-console.log('Next Steps:');
-console.log('1. Construct your 5 Notion databases according to the schema in docs/SETUP.md');
-console.log('2. Paste your Notion API Key and Database IDs into .dev.vars');
-console.log('3. Run `npm run dev` to test locally');
-console.log('4. Run `npx wrangler secret put NOTION_API_KEY` (and the others) for deployment');
+rl.close();
+console.log('\nSetup complete. Next: run `npm run onboard` to personalise your schedule.\n');
