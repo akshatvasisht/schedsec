@@ -13,7 +13,7 @@ const P = CONFIG.PROPERTIES;
  */
 export async function bootstrapSystem(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
   const vectorize = new VectorizeManager(env);
 
@@ -142,6 +142,8 @@ export async function bootstrapSystem(env) {
     history: []
   });
   await context.set('external_calendar_blocks', []);
+  await context.set('work_days', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], 'Default work days — update via npm run onboard');
+  await context.set('buffer_style', { name: 'adaptive', buffer_minutes: 15 }, 'Default break style');
   await context.set('ai_quality_metrics', {
     current_week: {
       avg_user_edits_per_day: 0, duration_accuracy: 1.0,
@@ -169,7 +171,7 @@ export async function bootstrapSystem(env) {
 export async function cleanupBootstrapData(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
-  const logger = new Logger(notion, env.LOGS_DB_ID);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
 
   const patterns = await context.get('inference_patterns_v2');
   if (!patterns) return;
