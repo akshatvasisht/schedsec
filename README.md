@@ -5,7 +5,6 @@
 ![Vectorize](https://img.shields.io/badge/Vector_DB-Cloudflare_Vectorize-FF8C00)
 ![Vitest](https://img.shields.io/badge/Vitest-Testing-6e9f18?logo=vitest&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
-
 SchedSec is an autonomous, serverless 'Scheduling Secretary' designed to automate the cognitive load of daily planning. Instead of relying solely on LLMs, SchedSec uses a hybrid architecture: deterministic constraint solvers combined with LLM-based semantic placement. It adapts to user habits, extracting rules to vector embeddings for semantic retrieval, enabling accurate, private scheduling without expensive SaaS subscriptions.
 
 ### The Philosophy: Hybrid Scheduling
