@@ -1,18 +1,14 @@
-import { NotionClient } from '../notion-client.js';
-import { Logger } from '../logger.js';
-import { ContextManager } from '../context.js';
 import { CONFIG } from '../config.js';
 
 /**
  * Health Check Worker (Triggered Monday 3 AM)
  * Full integrity check including AI quality monitoring.
- * @param env The parameter.
- * @returns {any} The return value.
+ * @param {object} env Environment bindings.
+ * @param {object} services Shared service instances for Notion, logging, and context.
+ * @returns {Promise<object>} Health-check result object with component statuses.
  */
-export async function handleHealth(env) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+export async function handleHealth(env, services) {
+  const { notion, logger, context } = services;
 
   const results = {
     notion_api: false,
@@ -106,6 +102,27 @@ export async function handleHealth(env) {
       results.quality_metrics = { passed: alerts.length === 0, alerts };
     }
   } catch (e) { await logger.error('HealthCheck: Quality metrics failed', { error: e.message }); }
+
+  // Detect stale partial schedule writes
+  try {
+    const writes = await env.KV.list({ prefix: 'schedule_write_' });
+    const now = Date.now();
+    for (const key of writes.keys) {
+      const raw = await env.KV.get(key.name);
+      if (!raw) continue;
+      const state = JSON.parse(raw);
+      if (state.status === 'in_progress' && state.started_at) {
+        const ageMs = now - new Date(state.started_at).getTime();
+        if (ageMs > 10 * 60 * 1000) {
+          results.quality_metrics.alerts.push({
+            type: 'PARTIAL_SCHEDULE_WRITE',
+            key: key.name,
+            age_minutes: Math.floor(ageMs / 60000)
+          });
+        }
+      }
+    }
+  } catch { /* non-critical */ }
 
   const status = Object.entries(results)
     .filter(([k]) => k !== 'quality_metrics')

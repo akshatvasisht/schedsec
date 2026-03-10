@@ -1,95 +1,148 @@
-# Interface & API Documentation
+# API Reference
 
-## Cloudflare Worker HTTP Endpoints
+SchedSec exposes a single Cloudflare Worker (`src/index.js`) that serves both scheduled automation and a small authenticated HTTP API.
 
-SchedSec utilizes a monorepo Cloudflare Worker `src/index.js` which acts as both a scheduled Cron processor and a manual HTTP API. All endpoints are accessed via the Worker's public or custom domain.
+## Authentication
 
-### Authentication
-All HTTP requests except `/trigger` require a standard authorization header matching your configured `WORKER_AUTH_TOKEN` secret.
+All endpoints except `/trigger` require:
+
 ```http
-Authorization: Bearer <your_secure_random_string>
+Authorization: Bearer <WORKER_AUTH_TOKEN>
 ```
 
-### Button Trigger (No Bearer)
-`GET /trigger` uses HMAC token validation for Notion buttons. See [docs/BUTTONS_AND_VIEWS.md](BUTTONS_AND_VIEWS.md) for setup.
+`GET /trigger` is intended for Notion buttons and uses an HMAC token derived from `BUTTON_SECRET`. Tokens are time-bucketed and expire automatically after roughly two hours. Setup instructions live in [`docs/SETUP.md`](SETUP.md#e-dashboard-buttons).
 
----
+## CORS
 
-## Core Operational Endpoints
+The Worker sends permissive CORS headers on API responses:
 
-### `GET /preview`
-**Description:** Manually triggers the Preview Generator worker to draft the upcoming day's schedule. Normally triggered via Cron (configured by `npm run onboard`).
-* **Parameters:** None
-* **Returns:** `{ "success": true, "count": 12, "aiAttempts": 1 }`
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS`
+- `Access-Control-Allow-Headers: Authorization, Content-Type`
 
-### `GET /final`
-**Description:** Manually triggers the Final Generator worker. Learns from manual Notion edits and finalizes today's timeline. Normally triggered via Cron (configured by `npm run onboard`).
-* **Parameters:** None
-* **Returns:** `{ "success": true, "learned_rules": 2, "edits": 2 }`
+## Endpoints
 
-### `GET /regenerate`
-**Description:** Forces a complete regeneration of today's schedule. Captures an immediate Undo snapshot, wipes today's schedule entries, and calls the Preview pipeline.
-* **Parameters:** None
-* **Returns:** `{ "success": true, "count": 10 }`
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/preview` | Bearer | Generate a preview schedule for today. |
+| `GET` | `/final` | Bearer | Learn from recent edits and finalize today's schedule. |
+| `GET` | `/regenerate` | Bearer | Snapshot, clear, and fully rebuild today's schedule. |
+| `GET` | `/stats` | Bearer | Compute weekly statistics and alerts. |
+| `GET` | `/health` | Bearer | Run the full health-check suite. |
+| `POST` | `/bootstrap` | Bearer | Seed a fresh install with starter context, rules, and example tasks. |
+| `POST` | `/onboard` | Bearer | Apply onboarding answers to context/KV. |
+| `GET` / `POST` / `DELETE` | `/calendar` | Bearer | Manage external calendar blocks. |
+| `POST` | `/planning` | Bearer | Generate an in-memory what-if schedule. |
+| `GET` | `/undo` | Bearer | Restore today's schedule from the latest snapshot. |
+| `POST` | `/restore` | Bearer | Restore one or more databases from an R2 backup. |
+| `GET` | `/export` | Bearer | Export recent schedule history as CSV or JSON. |
+| `POST` | `/reset` | Bearer | Run a scoped reset (`rules`, `schedule`, or `full`). |
+| `GET` / `POST` / `DELETE` | `/panic` | Bearer | Read, set, or clear the current daily override. |
+| `POST` | `/webhook` | Bearer | Trigger regenerate with cooldown protection. |
+| `GET` | `/trigger` | HMAC | Notion-button trigger for `regenerate`, `undo`, or `planning`. |
 
-### `GET /stats`
-**Description:** Manually triggers the weekly stats aggregator. Calculates completion rate, AI edit percentage, and updates the Stats DB.
-* **Parameters:** None
-* **Returns:** `{ "completionRate": 85, "totalTasks": 45, "alerts": [] }`
-
-### `GET /health`
-**Description:** Executes a full system health check across Notion, KV, AI models, and Vectorize.
-* **Parameters:** None
-* **Returns:** `{ "status": "HEALTHY", "checks": { ... } }`
-
----
-
-## Configuration Endpoints
-
-### `POST /bootstrap`
-**Description:** Cold-starts the system. Seeds default inference patterns, provides example tasks in the Inputs DB, and seeds bootstrap rules into Vectorize.
-* **Parameters:** None
-* **Returns:** `{ "success": true, "seeded": 10 }`
+## Selected Request/Response Shapes
 
 ### `POST /onboard`
-**Description:** Ingests user answers from the onboarding flow to customize inference behaviors and default schedules (e.g. tracking lunch breaks).
-* **Parameters:** 
-  ```json
-  {
-    "deep_work_time": 1,
-    "meeting_length": 1,
-    "lunch_time": 1,
-    "work_hours": 2,
-    "meeting_preference": 1
-  }
-  ```
-* **Returns:** `{ "success": true }`
 
-### `POST /calendar` (and `GET`, `DELETE`)
-**Description:** Manages the manual configuration of external calendar blocks.
-* **Parameters:** `date` (YYYY-MM-DD), `start` (HH:MM), `end` (HH:MM), `label`
-* **Returns:** Array of all active external calendar blocks.
+Minimal example:
+
+```json
+{
+  "deep_work_time": 1,
+  "meeting_length": 1,
+  "lunch_time": 1,
+  "work_hours": 2,
+  "meeting_preference": 1,
+  "timezone": "America/Chicago",
+  "preview_time": "21:30",
+  "final_time": "05:30"
+}
+```
+
+Returns:
+
+```json
+{
+  "success": true
+}
+```
 
 ### `POST /planning`
-**Description:** Generates a what-if schedule scenario without writing to Notion.
-* **Parameters:** `{ "tasks": [...], "modifications": { "add_tasks", "remove_tasks", "modify_tasks" } }`
-* **Returns:** `{ "success": true, "data": [...], "modifications_applied": {...} }`
 
-### `GET /undo`
-**Description:** Restores today's schedule from the last Undo snapshot (taken before Regenerate).
-* **Parameters:** None
-* **Returns:** `{ "success": true, "restored": 5 }` or `{ "success": false, "error": "NO_SNAPSHOT" }`
+```json
+{
+  "tasks": [],
+  "modifications": {
+    "add_tasks": [],
+    "remove_tasks": [],
+    "modify_tasks": []
+  }
+}
+```
+
+Returns an in-memory scenario without writing to Notion:
+
+```json
+{
+  "success": true,
+  "data": [],
+  "modifications_applied": {}
+}
+```
+
+### `GET /export`
+
+Query params:
+
+- `days`: lookback window, default `30`
+- `format`: `csv` or `json`, default `csv`
+
+CSV returns an attachment. JSON returns:
+
+```json
+{
+  "success": true,
+  "count": 42,
+  "data": []
+}
+```
+
+### `POST /restore`
+
+```json
+{
+  "date": "2026-03-09",
+  "scope": "all"
+}
+```
+
+### `POST /reset`
+
+```json
+{
+  "scope": "rules",
+  "dry_run": true
+}
+```
 
 ### `GET /trigger`
-**Description:** Secure trigger for Notion buttons. No Bearer auth; uses HMAC token.
-* **Parameters:** `action` (regenerate|undo|planning), `token` (hex HMAC), `date` (optional, default today)
-* **Returns:** Same as the underlying action.
 
----
+Query params:
+
+- `action`: `regenerate`, `undo`, or `planning`
+- `token`: hex-encoded HMAC token
+- `date`: optional `YYYY-MM-DD`, defaults to the Worker's computed "today"
+
+Returns the same payload as the underlying action.
 
 ## Error Handling
 
-Standard Cloudflare Worker HTTP status codes are used. Detailed error reasons are provided in the response body.
+The API uses standard HTTP status codes with JSON error payloads where possible.
 
-* **401 Unauthorized:** Invalid or missing `Authorization: Bearer` token.
-* **500 Internal Server Error:** Unexpected exceptions (Dependency Cycles, Notion rate limits). Check the Notion Logs DB for full stack traces.
+- `401 Unauthorized`: Missing or invalid bearer token, or invalid/expired trigger token
+- `400 Bad Request`: Invalid route parameters or malformed request body
+- `405 Method Not Allowed`: Wrong HTTP method for the endpoint
+- `500 Internal Server Error`: Unexpected runtime failure
+
+Operational failures are also written to the Notion Logs database through the buffered logger.

@@ -71,12 +71,3 @@ SchedSec relies heavily on purely deterministic math and graph theory both befor
 
 4. **Buffer Math & Transition Times**
    Inter-task transition gaps are determined programmatically based on learned historical buffers (`BufferLearning`), user preferences (Pomodoro vs Marathon), and mathematical minimums. The AI does not guess how long a break should be.
-
-## Design Constraints & Trade-offs
-
-* **Decision:** Hybrid AI + Algorithmic approach (AI for placement, Algorithms for constraint checking).
-  * **Alternative Considered:** Pure LLM generation.
-  * **Rationale:** Pure LLMs frequently hallucinate time math and violate hard constraints (like lunch breaks). Algorithms guarantee safety; the LLM handles context-aware placement.
-* **Decision:** Notion as the primary database.
-  * **Alternative Considered:** Cloudflare D1 with a custom React frontend.
-  * **Rationale:** The primary goal is frictionless user adoption. Users already live in Notion. Building a custom frontend adds maintenance overhead for negative UX value.

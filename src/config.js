@@ -19,11 +19,31 @@ export const CONFIG = {
     ENERGY_LEVEL: 'Moderate',
     PRIORITY: 'Medium',
     TIME_PREFERENCE: 'Anytime',
+    TASK_TYPE: 'TASK',
     WORK_DAY_START: '09:00',
     WORK_DAY_END: '17:00',
     TIMEZONE: 'America/New_York',
     MAX_REGEN_PER_5MIN: 1,
     PROMPT_VERSION: 'v4'
+  },
+
+  // Run mode: "standard" uses full AI + prefetch; "budget" caps AI calls and skips prefetch.
+  // Set via RUN_MODE env var in wrangler.toml or .dev.vars. Defaults to "standard".
+  RUN_MODE: {
+    STANDARD: 'standard',
+    BUDGET: 'budget'
+  },
+
+  BUDGET: {
+    AI_MAX_RETRIES: 1,
+    ENABLE_PREFETCH: false,
+    REGENERATE_COOLDOWN_SECONDS: 3600
+  },
+
+  STANDARD: {
+    AI_MAX_RETRIES: 3,
+    ENABLE_PREFETCH: true,
+    REGENERATE_COOLDOWN_SECONDS: 1800
   },
 
   // Skip Reason options (for rule extraction filtering)
@@ -91,6 +111,8 @@ export const CONFIG = {
       TASK: 'Task_Link',
       AI_START: 'AI_Start',
       AI_DURATION: 'AI_Duration',
+      CORRECTION_FLAG: 'Correction_Flag',
+      SKIP_REASON: 'Skip_Reason',
       FINAL_START: 'Final_Start',
       FINAL_DURATION: 'Final_Duration',
       ACTUAL_DURATION: 'Actual_Duration',
@@ -162,6 +184,15 @@ export const CONFIG = {
     }
   },
 
+  /**
+   * Returns budget or standard config block based on RUN_MODE env var.
+   * @param {object} env - Worker env bindings.
+   * @returns {object} Config block with AI_MAX_RETRIES, ENABLE_PREFETCH, REGENERATE_COOLDOWN_SECONDS.
+   */
+  getRunConfig(env) {
+    return (env.RUN_MODE === 'budget') ? this.BUDGET : this.STANDARD;
+  },
+
   // Conflict Types
   CONFLICT_TYPES: [
     'TIME_OVERLAP',
@@ -174,3 +205,27 @@ export const CONFIG = {
     'FIXED_APPOINTMENT_CONFLICT'
   ]
 };
+
+/**
+ * Validates required worker env bindings at runtime.
+ * @param {Object} env Worker bindings.
+ */
+export function validateEnv(env) {
+  const required = [
+    'NOTION_API_KEY',
+    'INPUTS_DB_ID',
+    'SCHEDULE_DB_ID',
+    'CONTEXT_DB_ID',
+    'LOGS_DB_ID',
+    'STATS_DB_ID',
+    'KV',
+    'R2_BUCKET',
+    'WORKER_AUTH_TOKEN',
+    'BUTTON_SECRET'
+  ];
+
+  const missing = required.filter(key => !env[key]);
+  if (missing.length > 0) {
+    throw new Error(`Missing required env bindings: ${missing.join(', ')}`);
+  }
+}

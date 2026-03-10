@@ -1,6 +1,3 @@
-import { NotionClient } from '../notion-client.js';
-import { Logger } from '../logger.js';
-import { ContextManager } from '../context.js';
 import { CONFIG } from '../config.js';
 import { RuleExtractor } from '../learning/rule-extraction.js';
 import { MLIntelligence } from '../scheduler/duration-learning.js';
@@ -18,14 +15,13 @@ const P = CONFIG.PROPERTIES;
  * Daily Final Generator
  * Analyzes yesterday's user edits to extract rules, then finalizes today's schedule.
  * Includes: plausibility filtering, correction flag awareness, end-of-day mining.
- * @param {object} env Environment bindings (AI, KV, D1, etc.).
+ * @param {object} env Environment bindings (AI, KV, Vectorize, etc.).
+ * @param {object} services Shared service instances for Notion, logging, and context.
  * @param {string} dateStr Today's date (YYYY-MM-DD).
  * @returns {Promise<object>} Execution summary with learning stats.
  */
-export async function handleFinal(env, dateStr) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+export async function handleFinal(env, services, dateStr) {
+  const { notion, logger, context } = services;
   const idempotency = new IdempotencyManager(env.KV);
   const undo = new UndoManager(env.KV, notion);
   const extractor = new RuleExtractor(env.AI);
@@ -66,8 +62,8 @@ export async function handleFinal(env, dateStr) {
         your_notes: props[P.SCHEDULE.YOUR_NOTES]?.rich_text?.[0]?.plain_text || '',
         status: props[P.SCHEDULE.STATUS]?.select?.name,
         // New fields for ML filtering
-        correction_flag: props.Correction_Flag?.checkbox || false,
-        skip_reason: props.Skip_Reason?.select?.name || null,
+        correction_flag: props[P.SCHEDULE.CORRECTION_FLAG]?.checkbox || false,
+        skip_reason: props[P.SCHEDULE.SKIP_REASON]?.select?.name || null,
         date: yesterdayStr
       };
     });
@@ -288,7 +284,7 @@ export async function handleFinal(env, dateStr) {
     }
 
     // Generate today's final schedule
-    const result = await handlePreview(env, dateStr, CONFIG.STATUS.SCHEDULE.SCHEDULED);
+    const result = await handlePreview(env, services, dateStr, CONFIG.STATUS.SCHEDULE.SCHEDULED);
 
     await logger.info(`Final generator completed for ${dateStr}`, {
       learned_rules: learnedRulesCount,

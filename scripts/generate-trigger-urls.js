@@ -28,7 +28,8 @@ function loadDevVars() {
 }
 
 function hmacHex(action, dateStr, secret) {
-  const payload = `${action}:${dateStr}`;
+  const hourBucket = Math.floor(Date.now() / (3600 * 1000));
+  const payload = `${action}:${dateStr}:${hourBucket}`;
   return createHmac('sha256', secret).update(payload).digest('hex');
 }
 

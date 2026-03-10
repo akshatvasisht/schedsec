@@ -5,9 +5,9 @@ import { CONFIG } from '../config.js';
  */
 export class UndoManager {
   /**
-   *
-   * @param kv The parameter.
-   * @param notionClient The parameter.
+   * Creates an undo manager backed by KV snapshots and the shared Notion client.
+   * @param {object} kv Cloudflare KV binding used for snapshot storage.
+   * @param {object} notionClient Shared Notion API client wrapper.
    */
   constructor(kv, notionClient) {
     this.kv = kv;
@@ -16,8 +16,9 @@ export class UndoManager {
 
   /**
    * Stores current schedule as a snapshot before regeneration.
-   * @param date The parameter.
-   * @param schedule The parameter.
+   * @param {string} date Date string (YYYY-MM-DD).
+   * @param {Array<object>} schedule Current schedule entries to persist in KV.
+   * @returns {Promise<void>} Resolves when the snapshot is written.
    */
   async createSnapshot(date, schedule) {
     const key = `undo_${date}`;
@@ -28,9 +29,10 @@ export class UndoManager {
 
   /**
    * Restores a schedule from a snapshot.
-   * @param date The parameter.
-   * @param _scheduleDbId The parameter.
-   * @returns {any} The return value.
+   * Legacy helper that returns snapshot contents without mutating Notion.
+   * @param {string} date Date string (YYYY-MM-DD).
+   * @param {string} _scheduleDbId Unused legacy parameter preserved for compatibility.
+   * @returns {Promise<object>} Snapshot payload or `NO_SNAPSHOT`.
    */
   async rollback(date, _scheduleDbId) {
     const key = `undo_${date}`;
@@ -52,7 +54,7 @@ export class UndoManager {
   /**
    * Checks if a snapshot exists for the given date.
    * @param {string} date - Date string (YYYY-MM-DD).
-   * @returns {Promise<boolean>}
+   * @returns {Promise<boolean>} True when a snapshot exists for the date.
    */
   async hasSnapshot(date) {
     const key = `undo_${date}`;
@@ -64,7 +66,7 @@ export class UndoManager {
    * Restores schedule from KV snapshot: archives current entries, recreates from snapshot.
    * @param {string} date - Date string (YYYY-MM-DD).
    * @param {string} scheduleDbId - Schedule database ID.
-   * @returns {Promise<Object>} { success, restored, error? }
+   * @returns {Promise<object>} Restore outcome with restored count or error code.
    */
   async restoreSnapshot(date, scheduleDbId) {
     const key = `undo_${date}`;

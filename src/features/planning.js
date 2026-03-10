@@ -8,9 +8,9 @@ import { CONFIG } from '../config.js';
 export class PlanningManager {
   /**
    * Generates a preview with temporary modifications.
-   * @param baseTasks The parameter.
-   * @param modifications The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object>} baseTasks Base task list to simulate against.
+   * @param {object} modifications Add/remove/modify operations for the scenario.
+   * @returns {object} In-memory what-if schedule result.
    */
   static generateScenario(baseTasks, modifications) {
     let tasks = [...baseTasks];
@@ -55,10 +55,10 @@ export class PlanningManager {
    * @param {Array} tasks - Base tasks (or empty to fetch from Inputs).
    * @param {Object} modifications - { add_tasks, remove_tasks, modify_tasks }.
    * @param {Object} env - Worker env (used if tasks empty to fetch from Notion).
-   * @param {string} dateStr - Target date (YYYY-MM-DD).
+   * @param {string} _dateStr - Target date (YYYY-MM-DD).
    * @returns {Promise<Object>} Scenario result.
    */
-  static async generateWhatIf(tasks, modifications, env, dateStr) {
+  static async generateWhatIf(tasks, modifications, env, _dateStr) {
     let baseTasks = Array.isArray(tasks) ? tasks : [];
     const mods = modifications || { add_tasks: [], remove_tasks: [], modify_tasks: [] };
 

@@ -21,7 +21,6 @@ import { execSync } from 'child_process';
 
 const ROOT = process.cwd();
 const WRANGLER_PATH = join(ROOT, 'wrangler.toml');
-const INDEX_PATH = join(ROOT, 'src', 'index.js');
 const DEV_VARS_PATH = join(ROOT, '.dev.vars');
 
 const ARGS = process.argv.slice(2);

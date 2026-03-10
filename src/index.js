@@ -17,6 +17,60 @@ import { NotionClient } from './notion-client.js';
 import { ContextManager } from './context.js';
 import { Logger } from './logger.js';
 import { validateTriggerToken } from './trigger.js';
+import { CONFIG, validateEnv } from './config.js';
+
+function withCors(response) {
+  response.headers.set('Access-Control-Allow-Origin', '*');
+  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  response.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  return response;
+}
+
+function jsonResponse(payload, status = 200, extraHeaders = {}) {
+  return withCors(new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...extraHeaders
+    }
+  }));
+}
+
+async function createServices(env) {
+  const notion = new NotionClient(env.NOTION_API_KEY);
+  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+  return { notion, logger, context };
+}
+
+async function flushServices(services) {
+  await services.context.flush();
+  await services.logger.flush();
+}
+
+async function getToday(env, fallbackTimezone = 'UTC') {
+  const cachedTz = await env.KV.get('user_timezone_cache');
+  const timezone = cachedTz || fallbackTimezone;
+  return new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+}
+
+async function runScheduledJob(event, env, services, dateStr) {
+  if (event.cron === env.CRON_PREVIEW) {
+    await handlePreview(env, services, dateStr);
+  } else if (event.cron === env.CRON_FINAL) {
+    await handleFinal(env, services, dateStr);
+  } else if (event.cron === env.CRON_STATS) {
+    await handleStats(env, services);
+  } else if (event.cron === env.CRON_CLEANUP) {
+    await handleCleanup(env, services);
+  } else if (event.cron === env.CRON_BACKUP) {
+    await handleBackup(env, services);
+  } else if (event.cron === env.CRON_HEALTH) {
+    await handleHealth(env, services);
+  } else {
+    await services.logger.warn(`Unrecognized cron trigger: ${event.cron}`);
+  }
+}
 
 /**
  * SchedSec Main Worker Entrypoint
@@ -24,86 +78,76 @@ import { validateTriggerToken } from './trigger.js';
 export default {
   /**
    * HTTP Request Handler
-   * @param request The parameter.
-   * @param env The parameter.
-   * @param _ctx The parameter.
-   * @returns {any} The return value.
+   * @param {Request} request Incoming HTTP request.
+   * @param {object} env Worker environment bindings.
+   * @param {object} _ctx Cloudflare execution context.
+   * @returns {Promise<Response>} HTTP response for the requested endpoint.
    */
   async fetch(request, env, _ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
     const authHeader = request.headers.get('Authorization');
+    const services = await createServices(env);
 
-    const today = new Date().toISOString().split('T')[0];
+    if (request.method === 'OPTIONS') {
+      return withCors(new Response(null, { status: 204 }));
+    }
 
-    if (path === '/trigger') {
-      const action = url.searchParams.get('action');
-      const token = url.searchParams.get('token');
-      const dateStr = url.searchParams.get('date') || today;
-      if (!env.BUTTON_SECRET) {
-        return new Response(JSON.stringify({ error: 'BUTTON_SECRET not configured' }), {
-          status: 503, headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      const valid = await validateTriggerToken(action, dateStr, token || '', env.BUTTON_SECRET);
-      if (!valid) {
-        return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
-          status: 401, headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      const notion = new NotionClient(env.NOTION_API_KEY);
-      try {
+    try {
+      validateEnv(env);
+      const today = await getToday(env);
+
+      if (path === '/trigger') {
+        const action = url.searchParams.get('action');
+        const token = url.searchParams.get('token');
+        const dateStr = url.searchParams.get('date') || today;
+        if (!env.BUTTON_SECRET) {
+          return jsonResponse({ error: 'BUTTON_SECRET not configured' }, 503);
+        }
+        const valid = await validateTriggerToken(action, dateStr, token || '', env.BUTTON_SECRET);
+        if (!valid) {
+          return jsonResponse({ error: 'Invalid or expired token' }, 401);
+        }
+
         let result;
         if (action === 'regenerate') {
-          result = await handleRegenerate(env, dateStr);
+          result = await handleRegenerate(env, services, dateStr);
         } else if (action === 'undo') {
-          const undo = new UndoManager(env.KV, notion);
+          const undo = new UndoManager(env.KV, services.notion);
           result = await undo.restoreSnapshot(dateStr, env.SCHEDULE_DB_ID);
         } else if (action === 'planning') {
           result = await PlanningManager.generateWhatIf([], {}, env, dateStr);
         } else {
-          return new Response(JSON.stringify({ error: 'Unknown action' }), {
-            status: 400, headers: { 'Content-Type': 'application/json' }
-          });
+          return jsonResponse({ error: 'Unknown action' }, 400);
         }
-        return new Response(JSON.stringify(result), {
-          headers: { 'Content-Type': 'application/json' }
-        });
-      } catch (err) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: { 'Content-Type': 'application/json' }
-        });
+        return jsonResponse(result);
       }
-    }
 
-    if (authHeader !== `Bearer ${env.WORKER_AUTH_TOKEN}`) {
-      return new Response('Unauthorized', { status: 401 });
-    }
-    const notion = new NotionClient(env.NOTION_API_KEY);
-    const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+      if (authHeader !== `Bearer ${env.WORKER_AUTH_TOKEN}`) {
+        return withCors(new Response('Unauthorized', { status: 401 }));
+      }
 
-    try {
       let result;
 
       switch (path) {
         case '/preview':
-          result = await handlePreview(env, today);
+          result = await handlePreview(env, services, today);
           break;
 
         case '/final':
-          result = await handleFinal(env, today);
+          result = await handleFinal(env, services, today);
           break;
 
         case '/regenerate':
-          result = await handleRegenerate(env, today);
+          result = await handleRegenerate(env, services, today);
           break;
 
         case '/stats':
-          result = await handleStats(env);
+          result = await handleStats(env, services);
           break;
 
         case '/health':
-          result = await handleHealth(env);
+          result = await handleHealth(env, services);
           break;
 
         case '/bootstrap':
@@ -113,16 +157,20 @@ export default {
         case '/onboard': {
           const body = await request.json();
           const resetMode = url.searchParams.get('reset') === 'true';
-          result = await OnboardingManager.applyAnswers(body, context, env.KV, resetMode);
+          result = await OnboardingManager.applyAnswers(body, services.context, env.KV, resetMode);
+          const tzConfig = await services.context.get('user_timezone_current');
+          if (tzConfig?.current) {
+            await env.KV.put('user_timezone_cache', tzConfig.current);
+          }
           break;
         }
 
         case '/panic': {
           if (request.method === 'GET') {
-            const override = await context.get('daily_override');
+            const override = await services.context.get('daily_override');
             result = { active: !!override, override: override || null };
           } else if (request.method === 'DELETE') {
-            await context.set('daily_override', null, 'Panic mode cleared');
+            await services.context.set('daily_override', null, 'Panic mode cleared');
             result = { success: true, message: 'Panic mode cleared' };
           } else {
             const body = await request.json().catch(() => ({}));
@@ -134,7 +182,7 @@ export default {
                 energy_filter: body.energy_filter || null,
                 priority_filter: body.priority_filter || null
               };
-            await context.set('daily_override', override, `Panic mode: ${override.reason}`);
+            await services.context.set('daily_override', override, `Panic mode: ${override.reason}`);
             result = { success: true, override };
           }
           break;
@@ -142,7 +190,7 @@ export default {
 
         case '/calendar': {
           const body = await request.json();
-          const calendar = new CalendarBlocks(context);
+          const calendar = new CalendarBlocks(services.context);
           if (request.method === 'POST') {
             result = await calendar.addBlock(body.date, body.start, body.end, body.label);
           } else if (request.method === 'DELETE') {
@@ -160,7 +208,7 @@ export default {
         }
 
         case '/undo': {
-          const undo = new UndoManager(env.KV, notion);
+          const undo = new UndoManager(env.KV, services.notion);
           result = await undo.restoreSnapshot(today, env.SCHEDULE_DB_ID);
           break;
         }
@@ -168,12 +216,10 @@ export default {
         case '/restore': {
           const body = await request.json();
           if (!body.date) {
-            return new Response(JSON.stringify({ error: 'date parameter required (YYYY-MM-DD)' }), {
-              status: 400, headers: { 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'date parameter required (YYYY-MM-DD)' }, 400);
           }
           const scope = body.scope || 'all';
-          result = await restoreFromBackup(env, body.date, scope);
+          result = await restoreFromBackup(env, services, body.date, scope);
           break;
         }
 
@@ -182,14 +228,14 @@ export default {
             days: url.searchParams.get('days') || '30',
             format: url.searchParams.get('format') || 'csv'
           };
-          const exportResult = await handleExport(env, params);
+          const exportResult = await handleExport(env, services, params);
           if (exportResult.csv) {
-            return new Response(exportResult.csv, {
+            return withCors(new Response(exportResult.csv, {
               headers: {
                 'Content-Type': 'text/csv',
                 'Content-Disposition': `attachment; filename="${exportResult.filename}"`
               }
-            });
+            }));
           }
           result = exportResult;
           break;
@@ -197,77 +243,86 @@ export default {
 
         case '/reset': {
           if (request.method !== 'POST') {
-            return new Response(JSON.stringify({ error: 'POST required' }), {
-              status: 405, headers: { 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'POST required' }, 405);
           }
           const body = await request.json().catch(() => ({}));
-          result = await handleReset(env, body);
+          result = await handleReset(env, services, body);
           break;
         }
 
         case '/webhook': {
           if (request.method !== 'POST') {
-            return new Response(JSON.stringify({ error: 'POST required' }), {
-              status: 405, headers: { 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'POST required' }, 405);
           }
-          // Rate-limit: max 1 regen per 30min
+          const runCfg = CONFIG.getRunConfig(env);
           const cooldownKey = `regen_cooldown_${today}`;
           const cooldown = await env.KV.get(cooldownKey);
           if (cooldown) {
-            result = { success: false, message: 'Regeneration cooldown active (30 min)' };
+            result = { success: false, message: `Regeneration cooldown active (${runCfg.REGENERATE_COOLDOWN_SECONDS}s)` };
           } else {
-            await env.KV.put(cooldownKey, 'active', { expirationTtl: 1800 });
-            result = await handleRegenerate(env, today);
+            await env.KV.put(cooldownKey, 'active', { expirationTtl: runCfg.REGENERATE_COOLDOWN_SECONDS });
+            result = await handleRegenerate(env, services, today);
           }
           break;
         }
 
         default:
-          return new Response('Not Found', { status: 404 });
+          return withCors(new Response('Not Found', { status: 404 }));
       }
 
-      return new Response(JSON.stringify(result), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return jsonResponse(result);
     } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return jsonResponse({ error: error.message }, 500);
+    } finally {
+      await flushServices(services);
     }
   },
 
   /**
    * Scheduled Cron Handler
-   * @param event The parameter.
-   * @param env The parameter.
-   * @param _ctx The parameter.
+   * @param {object} event Cloudflare scheduled event payload.
+   * @param {object} env Worker environment bindings.
+   * @param {object} _ctx Cloudflare execution context.
+   * @returns {Promise<void>} Resolves after the cron run completes or is marked pending.
    */
   async scheduled(event, env, _ctx) {
-    const today = new Date().toISOString().split('T')[0];
-    const notion = new NotionClient(env.NOTION_API_KEY);
-    const logger = new Logger(notion, env.LOGS_DB_ID, env);
+    const services = await createServices(env);
+    const today = await getToday(env);
 
     try {
-      if (event.cron === env.CRON_PREVIEW) {
-        await handlePreview(env, today);
-      } else if (event.cron === env.CRON_FINAL) {
-        await handleFinal(env, today);
-      } else if (event.cron === env.CRON_STATS) {
-        await handleStats(env);
-      } else if (event.cron === env.CRON_CLEANUP) {
-        await handleCleanup(env);
-      } else if (event.cron === env.CRON_BACKUP) {
-        await handleBackup(env);
-      } else if (event.cron === env.CRON_HEALTH) {
-        await handleHealth(env);
-      } else {
-        await logger.warn(`Unrecognized cron trigger: ${event.cron}`);
+      validateEnv(env);
+
+      // Retry pending failed cron runs for this trigger first.
+      const pending = await env.KV.list({ prefix: 'pending_cron_' });
+      for (const key of pending.keys) {
+        const payload = await env.KV.get(key.name);
+        if (!payload) continue;
+        const pendingRun = JSON.parse(payload);
+        if (pendingRun.cron !== event.cron) continue;
+        try {
+          await runScheduledJob({ cron: pendingRun.cron }, env, services, pendingRun.date || today);
+          await env.KV.delete(key.name);
+          await services.logger.info('Retried pending cron run', { key: key.name, cron: pendingRun.cron });
+        } catch (retryError) {
+          await services.logger.warn('Pending cron retry failed', {
+            key: key.name,
+            cron: pendingRun.cron,
+            error: retryError.message
+          });
+        }
       }
+
+      await runScheduledJob(event, env, services, today);
     } catch (error) {
-      await logger.error(`Cron failed: ${event.cron}`, { error: error.message, stack: error.stack });
+      const pendingKey = `pending_cron_${event.cron}_${today}`;
+      await env.KV.put(pendingKey, JSON.stringify({ cron: event.cron, date: today }), { expirationTtl: 86400 });
+      await services.logger.error(`Cron failed: ${event.cron}`, {
+        error: error.message,
+        stack: error.stack,
+        pendingKey
+      });
+    } finally {
+      await flushServices(services);
     }
   }
 };

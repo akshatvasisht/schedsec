@@ -1,6 +1,3 @@
-import { NotionClient } from '../notion-client.js';
-import { Logger } from '../logger.js';
-import { ContextManager } from '../context.js';
 import { PatternAnalyzer } from '../learning/patterns.js';
 import { ConfidenceDecay } from '../learning/decay.js';
 import { cleanupBootstrapData } from '../bootstrap.js';
@@ -11,13 +8,12 @@ const P = CONFIG.PROPERTIES;
 /**
  * Data Janitor Worker (Triggered 1st of month)
  * Pattern extraction, CSV archival, confidence decay, log purge.
- * @param env The parameter.
- * @returns {any} The return value.
+ * @param {object} env Environment bindings.
+ * @param {object} services Shared service instances for Notion, logging, and context.
+ * @returns {Promise<object>} Cleanup summary with archived/deleted counts.
  */
-export async function handleCleanup(env) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+export async function handleCleanup(env, services) {
+  const { notion, logger, context } = services;
 
   const now = new Date();
   const ninetyDaysAgo = new Date(now);

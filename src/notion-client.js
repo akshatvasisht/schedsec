@@ -6,8 +6,8 @@ import { NotionAPIError } from './errors.js';
  */
 export class NotionClient {
   /**
-   *
-   * @param apiKey The parameter.
+   * Creates a rate-limited wrapper around the official Notion client.
+   * @param {string} apiKey Internal integration token used for Notion API calls.
    */
   constructor(apiKey) {
     this.client = new Client({ auth: apiKey });
@@ -39,7 +39,10 @@ export class NotionClient {
           await new Promise(r => { setTimeout(r, wait); });
           this.requestQueue.unshift({ fn, resolve, reject, retries: retries - 1 });
         } else {
-          reject(new NotionAPIError(error.message, error));
+          reject(new NotionAPIError(error.status || 0, {
+            message: error.message,
+            code: error.code
+          }));
         }
       }
       await new Promise(r => { setTimeout(r, this.delayMs); });
@@ -50,8 +53,10 @@ export class NotionClient {
 
   /**
    * Generic request wrapper.
-   * @param fn The parameter.
-   * @param retries The parameter.
+   * Queues a Notion API operation behind the shared in-request rate limiter.
+   * @param {Function} fn Deferred Notion API call.
+   * @param {number} [retries=3] Remaining retry attempts for rate-limited responses.
+   * @returns {Promise<unknown>} Result of the wrapped Notion API call.
    */
   async request(fn, retries = 3) {
     return new Promise((resolve, reject) => {
@@ -61,25 +66,36 @@ export class NotionClient {
   }
 
   /**
-   * Query a database.
-   * @param databaseId The parameter.
-   * @param filter The parameter.
-   * @param sorts The parameter.
-   * @returns {any} The return value.
+   * Queries a Notion database and transparently paginates all results.
+   * @param {string} databaseId Target database ID.
+   * @param {object} [filter] Optional Notion database filter object.
+   * @param {Array<object>} [sorts] Optional Notion sort definitions.
+   * @returns {Promise<{results: Array<object>}>} Aggregated query results across all pages.
    */
   async queryDatabase(databaseId, filter = undefined, sorts = undefined) {
-    return this.request(() => this.client.databases.query({
-      database_id: databaseId,
-      filter,
-      sorts
-    }));
+    let allResults = [];
+    let cursor;
+
+    do {
+      const response = await this.request(() => this.client.databases.query({
+        database_id: databaseId,
+        filter,
+        sorts,
+        start_cursor: cursor
+      }));
+
+      allResults = allResults.concat(response.results || []);
+      cursor = response.has_more ? response.next_cursor : undefined;
+    } while (cursor);
+
+    return { results: allResults };
   }
 
   /**
-   * Update a page.
-   * @param pageId The parameter.
-   * @param properties The parameter.
-   * @returns {any} The return value.
+   * Updates properties on an existing Notion page.
+   * @param {string} pageId Target page ID.
+   * @param {object} properties Notion properties payload.
+   * @returns {Promise<object>} Updated Notion page object.
    */
   async updatePage(pageId, properties) {
     return this.request(() => this.client.pages.update({
@@ -89,10 +105,10 @@ export class NotionClient {
   }
 
   /**
-   * Create a page in a database.
-   * @param databaseId The parameter.
-   * @param properties The parameter.
-   * @returns {any} The return value.
+   * Creates a page inside a Notion database.
+   * @param {string} databaseId Parent database ID.
+   * @param {object} properties Notion properties payload.
+   * @returns {Promise<object>} Created Notion page object.
    */
   async createPage(databaseId, properties) {
     return this.request(() => this.client.pages.create({
@@ -102,18 +118,18 @@ export class NotionClient {
   }
 
   /**
-   * Retrieve a page.
-   * @param pageId The parameter.
-   * @returns {any} The return value.
+   * Retrieves a single Notion page by ID.
+   * @param {string} pageId Target page ID.
+   * @returns {Promise<object>} Notion page object.
    */
   async getPage(pageId) {
     return this.request(() => this.client.pages.retrieve({ page_id: pageId }));
   }
 
   /**
-   * Archive a page.
-   * @param pageId The parameter.
-   * @returns {any} The return value.
+   * Archives a Notion page.
+   * @param {string} pageId Target page ID.
+   * @returns {Promise<object>} Archived Notion page object.
    */
   async archivePage(pageId) {
     return this.request(() => this.client.pages.update({

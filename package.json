@@ -10,6 +10,7 @@
     "configure-times": "node scripts/onboard.js --times-only",
     "verify-schema": "node scripts/verify-schema.js",
     "trigger-urls": "node scripts/generate-trigger-urls.js",
+    "prepare": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",

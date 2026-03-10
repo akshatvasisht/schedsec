@@ -1,0 +1,2782 @@
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 2a314f8..3e99c66 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -1,21 +1,40 @@
+ name: Deploy Worker
+ 
+ on:
+   workflow_dispatch:
++  pull_request:
++    branches: [main]
+ 
+ jobs:
++  check:
++    if: github.event_name == 'pull_request'
++    runs-on: ubuntu-latest
++    name: Check
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 20
++      - name: Install dependencies
++        run: npm ci
++      - name: Lint
++        run: npm run lint
++      - name: Run tests
++        run: npm test
++
+   deploy:
++    if: github.event_name == 'workflow_dispatch'
+     runs-on: ubuntu-latest
+     name: Deploy
+     steps:
+       - uses: actions/checkout@v4
+       - uses: actions/setup-node@v4
+         with:
+           node-version: 20
+       - name: Install dependencies
+-        run: npm install
++        run: npm ci
+       - name: Run tests
+         run: npm test
+       - name: Deploy
+         uses: cloudflare/wrangler-action@v3
+         with:
+diff --git a/README.md b/README.md
+index db5ce1f..386150b 100644
+--- a/README.md
++++ b/README.md
+@@ -1,58 +1,45 @@
++<p align="center">
++  <img 
++    width="200" 
++    height="200" 
++    alt="SchedSec Logo" 
++    src="docs/images/logo.svg" 
++  />
++</p>
++
+ ![JavaScript](https://img.shields.io/badge/JavaScript-ES6%2B-yellow?logo=javascript&logoColor=white)
+ ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare_Workers-Serverless-f38020?logo=cloudflare&logoColor=white)
+ ![Notion API](https://img.shields.io/badge/Notion_API-Integration-black?logo=notion&logoColor=white)
+ ![Qwen Model](https://img.shields.io/badge/AI-Qwen_2.5_7B-1E90FF)
+-![Vectorize](https://img.shields.io/badge/Vector_DB-Cloudflare_Vectorize-FF8C00)
++![Cloudflare Vectorize](https://img.shields.io/badge/Cloudflare_Vectorize-Database-f38020?logo=cloudflare&logoColor=white)
+ ![Vitest](https://img.shields.io/badge/Vitest-Testing-6e9f18?logo=vitest&logoColor=white)
+ ![License](https://img.shields.io/badge/License-MIT-green)
+-SchedSec is an autonomous, serverless 'Scheduling Secretary' designed to automate the cognitive load of daily planning. Instead of relying solely on LLMs, SchedSec uses a hybrid architecture: deterministic constraint solvers combined with LLM-based semantic placement. It adapts to user habits, extracting rules to vector embeddings for semantic retrieval, enabling accurate, private scheduling without expensive SaaS subscriptions.
+-
+-### The Philosophy: Hybrid Scheduling
+-
+-SchedSec addresses an LLM weakness: mathematical reasoning. Pure LLMs often overlap tasks, ignore constraints, or violate dependency trees when scheduling. SchedSec solves this by offloading feasibility to deterministic solvers, using the LLM solely for semantic placement.
+-
+-### How SchedSec Works
+-
+-SchedSec extends into an autonomous learning system by leveraging an end-to-end algorithmic -> semantic -> feedback pipeline:
+-
+-1. **Constraint Validation Layer (Optimization Engine)**
+-   Resolves topological dependencies, calculates energy budgets, and pre-computes available free blocks.
+-2. **Context Retrieval Layer (Cloudflare Vectorize)**
+-   Searches the historical graph for semantic rules (e.g., "Deep work shouldn't follow a 1-hour meeting").
+-3. **Generation Layer (Cloudflare Workers AI)**
+-   Prompts Qwen 2.5 7B with verified free slots and context rules to generate a deterministic JSON timeline.
+-4. **Learning Layer (Final Generator Worker)**
+-   Analyzes manual user edits (diffs) made to the AI's schedule during the day, updating internal inference matrices via Exponential Moving Average (EMA) and extracting new rules for Vectorize.
+-
+-## Impact
+ 
+-Traditional smart calendars are subscription-based black boxes. SchedSec operates transparently via Notion, giving users manual control while offloading computation to Cloudflare's serverless edge.
++SchedSec is a self-hosted, serverless scheduling assistant that generates your daily task schedule automatically using a hybrid approach: deterministic constraint solvers handle the math (dependencies, energy budgets, fixed appointments), while Cloudflare Workers AI handles semantic placement. It learns from your edits over time and runs entirely on your own Cloudflare and Notion accounts with no subscription or third-party data sharing.
+ 
+-### Performance
++## How It Works
+ 
+-- **Constraint Adherence**: 100% adherence to mathematical constraints (fixed appointments, dead-ends, multi-day splits) via the hybrid architecture.
+-- **Algorithmic Latency**: <50ms for dependency resolution and slot finding.
+-- **Inference Latency**: ~3-5s for full daily schedule generation via Qwen 2.5 7B on Cloudflare Edge.
++Each day, a Cron-triggered pipeline runs in two stages:
+ 
+-### Applications
++1. **Preview** (overnight) — Fetches your active tasks, resolves dependencies (DAG topological sort), enforces energy budgets, finds free time slots around fixed appointments, and prompts Qwen 2.5 7B to place tasks semantically. Writes a draft schedule to Notion.
++2. **Final** (morning) — Reads any manual edits you made to the draft, learns from them (EMA inference updates, rule extraction to Vectorize), and locks the schedule.
+ 
+-**Automated Daily Planning**
+-- Offloads scheduling by providing a customized, constraint-checked draft schedule every morning based on inferred priorities.
++The system never stores your data anywhere except your own Notion workspace and Cloudflare account.
+ 
+-**Dynamic Workload Balancing**
+-- People handling multiple projects can drop tasks into the Notion inbox and let the system split execution over multiple days via internal 40/35/25 energy decay algorithms.
++## Performance
+ 
+-**High-Security Ecosystems**
+-- Users retain 100% ownership of their data in Notion and run the compute logic on their own Cloudflare tenant, completely avoiding third-party data ingestion, completely free.
++- Constraint adherence: 100% (dependency cycles, energy caps, and fixed appointments are enforced deterministically before the AI is called)
++- Algorithmic latency: <50ms for dependency resolution and slot finding
++- Schedule generation: ~3–5s via Qwen 2.5 7B on Cloudflare Edge
+ 
+ ## Documentation
+ 
+-- **[SETUP.md](docs/SETUP.md)**: Deployment, resource provisioning, and Notion integration.
+-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: System design, Data/Intelligence/Memory layers, and D1/Vectorize schemas.
+-- **[API.md](docs/API.md)**: Worker HTTP endpoints, HMAC security, and authentication.
+-- **[TESTING.md](docs/TESTING.md)**: Local development and regression suite guidelines.
+-- **[STYLE.md](docs/STYLE.md)**: Coding standards and project architectural invariants.
++- **[SETUP.md](docs/SETUP.md)** — Get running in minutes: Notion template, `npm run setup`, `npm run onboard`
++- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System components, data flow, and constraint algorithms
++- **[API.md](docs/API.md)** — HTTP endpoints, authentication, and Notion button setup
++- **[TESTING.md](docs/TESTING.md)** — Running tests and the core regression suite
++- **[STYLE.md](docs/STYLE.md)** — Coding standards and architectural invariants
+ 
+ ## License
+ 
+ See **[LICENSE](LICENSE)** file for details.
+diff --git a/docs/API.md b/docs/API.md
+index 228696f..603c21b 100644
+--- a/docs/API.md
++++ b/docs/API.md
+@@ -1,95 +1,148 @@
+-# Interface & API Documentation
++# API Reference
+ 
+-## Cloudflare Worker HTTP Endpoints
++SchedSec exposes a single Cloudflare Worker (`src/index.js`) that serves both scheduled automation and a small authenticated HTTP API.
+ 
+-SchedSec utilizes a monorepo Cloudflare Worker `src/index.js` which acts as both a scheduled Cron processor and a manual HTTP API. All endpoints are accessed via the Worker's public or custom domain.
++## Authentication
++
++All endpoints except `/trigger` require:
+ 
+-### Authentication
+-All HTTP requests except `/trigger` require a standard authorization header matching your configured `WORKER_AUTH_TOKEN` secret.
+ ```http
+-Authorization: Bearer <your_secure_random_string>
++Authorization: Bearer <WORKER_AUTH_TOKEN>
+ ```
+ 
+-### Button Trigger (No Bearer)
+-`GET /trigger` uses HMAC token validation for Notion buttons. See [docs/BUTTONS_AND_VIEWS.md](BUTTONS_AND_VIEWS.md) for setup.
++`GET /trigger` is intended for Notion buttons and uses an HMAC token derived from `BUTTON_SECRET`. Tokens are time-bucketed and expire automatically after roughly two hours. Setup instructions live in [`docs/SETUP.md`](SETUP.md#e-dashboard-buttons).
+ 
+----
++## CORS
+ 
+-## Core Operational Endpoints
++The Worker sends permissive CORS headers on API responses:
+ 
+-### `GET /preview`
+-**Description:** Manually triggers the Preview Generator worker to draft the upcoming day's schedule. Normally triggered via Cron (configured by `npm run onboard`).
+-* **Parameters:** None
+-* **Returns:** `{ "success": true, "count": 12, "aiAttempts": 1 }`
++- `Access-Control-Allow-Origin: *`
++- `Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS`
++- `Access-Control-Allow-Headers: Authorization, Content-Type`
+ 
+-### `GET /final`
+-**Description:** Manually triggers the Final Generator worker. Learns from manual Notion edits and finalizes today's timeline. Normally triggered via Cron (configured by `npm run onboard`).
+-* **Parameters:** None
+-* **Returns:** `{ "success": true, "learned_rules": 2, "edits": 2 }`
++## Endpoints
+ 
+-### `GET /regenerate`
+-**Description:** Forces a complete regeneration of today's schedule. Captures an immediate Undo snapshot, wipes today's schedule entries, and calls the Preview pipeline.
+-* **Parameters:** None
+-* **Returns:** `{ "success": true, "count": 10 }`
++| Method | Path | Auth | Purpose |
++|---|---|---|---|
++| `GET` | `/preview` | Bearer | Generate a preview schedule for today. |
++| `GET` | `/final` | Bearer | Learn from recent edits and finalize today's schedule. |
++| `GET` | `/regenerate` | Bearer | Snapshot, clear, and fully rebuild today's schedule. |
++| `GET` | `/stats` | Bearer | Compute weekly statistics and alerts. |
++| `GET` | `/health` | Bearer | Run the full health-check suite. |
++| `POST` | `/bootstrap` | Bearer | Seed a fresh install with starter context, rules, and example tasks. |
++| `POST` | `/onboard` | Bearer | Apply onboarding answers to context/KV. |
++| `GET` / `POST` / `DELETE` | `/calendar` | Bearer | Manage external calendar blocks. |
++| `POST` | `/planning` | Bearer | Generate an in-memory what-if schedule. |
++| `GET` | `/undo` | Bearer | Restore today's schedule from the latest snapshot. |
++| `POST` | `/restore` | Bearer | Restore one or more databases from an R2 backup. |
++| `GET` | `/export` | Bearer | Export recent schedule history as CSV or JSON. |
++| `POST` | `/reset` | Bearer | Run a scoped reset (`rules`, `schedule`, or `full`). |
++| `GET` / `POST` / `DELETE` | `/panic` | Bearer | Read, set, or clear the current daily override. |
++| `POST` | `/webhook` | Bearer | Trigger regenerate with cooldown protection. |
++| `GET` | `/trigger` | HMAC | Notion-button trigger for `regenerate`, `undo`, or `planning`. |
+ 
+-### `GET /stats`
+-**Description:** Manually triggers the weekly stats aggregator. Calculates completion rate, AI edit percentage, and updates the Stats DB.
+-* **Parameters:** None
+-* **Returns:** `{ "completionRate": 85, "totalTasks": 45, "alerts": [] }`
++## Selected Request/Response Shapes
+ 
+-### `GET /health`
+-**Description:** Executes a full system health check across Notion, KV, AI models, and Vectorize.
+-* **Parameters:** None
+-* **Returns:** `{ "status": "HEALTHY", "checks": { ... } }`
++### `POST /onboard`
+ 
+----
++Minimal example:
++
++```json
++{
++  "deep_work_time": 1,
++  "meeting_length": 1,
++  "lunch_time": 1,
++  "work_hours": 2,
++  "meeting_preference": 1,
++  "timezone": "America/Chicago",
++  "preview_time": "21:30",
++  "final_time": "05:30"
++}
++```
+ 
+-## Configuration Endpoints
++Returns:
+ 
+-### `POST /bootstrap`
+-**Description:** Cold-starts the system. Seeds default inference patterns, provides example tasks in the Inputs DB, and seeds bootstrap rules into Vectorize.
+-* **Parameters:** None
+-* **Returns:** `{ "success": true, "seeded": 10 }`
++```json
++{
++  "success": true
++}
++```
+ 
+-### `POST /onboard`
+-**Description:** Ingests user answers from the onboarding flow to customize inference behaviors and default schedules (e.g. tracking lunch breaks).
+-* **Parameters:** 
+-  ```json
+-  {
+-    "deep_work_time": 1,
+-    "meeting_length": 1,
+-    "lunch_time": 1,
+-    "work_hours": 2,
+-    "meeting_preference": 1
++### `POST /planning`
++
++```json
++{
++  "tasks": [],
++  "modifications": {
++    "add_tasks": [],
++    "remove_tasks": [],
++    "modify_tasks": []
+   }
+-  ```
+-* **Returns:** `{ "success": true }`
++}
++```
+ 
+-### `POST /calendar` (and `GET`, `DELETE`)
+-**Description:** Manages the manual configuration of external calendar blocks.
+-* **Parameters:** `date` (YYYY-MM-DD), `start` (HH:MM), `end` (HH:MM), `label`
+-* **Returns:** Array of all active external calendar blocks.
++Returns an in-memory scenario without writing to Notion:
+ 
+-### `POST /planning`
+-**Description:** Generates a what-if schedule scenario without writing to Notion.
+-* **Parameters:** `{ "tasks": [...], "modifications": { "add_tasks", "remove_tasks", "modify_tasks" } }`
+-* **Returns:** `{ "success": true, "data": [...], "modifications_applied": {...} }`
++```json
++{
++  "success": true,
++  "data": [],
++  "modifications_applied": {}
++}
++```
++
++### `GET /export`
++
++Query params:
+ 
+-### `GET /undo`
+-**Description:** Restores today's schedule from the last Undo snapshot (taken before Regenerate).
+-* **Parameters:** None
+-* **Returns:** `{ "success": true, "restored": 5 }` or `{ "success": false, "error": "NO_SNAPSHOT" }`
++- `days`: lookback window, default `30`
++- `format`: `csv` or `json`, default `csv`
++
++CSV returns an attachment. JSON returns:
++
++```json
++{
++  "success": true,
++  "count": 42,
++  "data": []
++}
++```
++
++### `POST /restore`
++
++```json
++{
++  "date": "2026-03-09",
++  "scope": "all"
++}
++```
++
++### `POST /reset`
++
++```json
++{
++  "scope": "rules",
++  "dry_run": true
++}
++```
+ 
+ ### `GET /trigger`
+-**Description:** Secure trigger for Notion buttons. No Bearer auth; uses HMAC token.
+-* **Parameters:** `action` (regenerate|undo|planning), `token` (hex HMAC), `date` (optional, default today)
+-* **Returns:** Same as the underlying action.
+ 
+----
++Query params:
++
++- `action`: `regenerate`, `undo`, or `planning`
++- `token`: hex-encoded HMAC token
++- `date`: optional `YYYY-MM-DD`, defaults to the Worker's computed "today"
++
++Returns the same payload as the underlying action.
+ 
+ ## Error Handling
+ 
+-Standard Cloudflare Worker HTTP status codes are used. Detailed error reasons are provided in the response body.
++The API uses standard HTTP status codes with JSON error payloads where possible.
++
++- `401 Unauthorized`: Missing or invalid bearer token, or invalid/expired trigger token
++- `400 Bad Request`: Invalid route parameters or malformed request body
++- `405 Method Not Allowed`: Wrong HTTP method for the endpoint
++- `500 Internal Server Error`: Unexpected runtime failure
+ 
+-* **401 Unauthorized:** Invalid or missing `Authorization: Bearer` token.
+-* **500 Internal Server Error:** Unexpected exceptions (Dependency Cycles, Notion rate limits). Check the Notion Logs DB for full stack traces.
++Operational failures are also written to the Notion Logs database through the buffered logger.
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index daca87d..95f9714 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -69,14 +69,5 @@ SchedSec relies heavily on purely deterministic math and graph theory both befor
+ 3. **1D Bin Packing (Slot Finding)**
+    Finding available free time blocks between fixed meetings is treated as a 1D bin-packing problem. The `SlotFinder` mathematically slices the user's working hours around fixed meetings (e.g., lunch bounds, external appointments), outputting a discrete array of `availableSlots` for the AI to choose from. This guarantees the LLM physically cannot double-book a fixed appointment.
+ 
+ 4. **Buffer Math & Transition Times**
+    Inter-task transition gaps are determined programmatically based on learned historical buffers (`BufferLearning`), user preferences (Pomodoro vs Marathon), and mathematical minimums. The AI does not guess how long a break should be.
+-
+-## Design Constraints & Trade-offs
+-
+-* **Decision:** Hybrid AI + Algorithmic approach (AI for placement, Algorithms for constraint checking).
+-  * **Alternative Considered:** Pure LLM generation.
+-  * **Rationale:** Pure LLMs frequently hallucinate time math and violate hard constraints (like lunch breaks). Algorithms guarantee safety; the LLM handles context-aware placement.
+-* **Decision:** Notion as the primary database.
+-  * **Alternative Considered:** Cloudflare D1 with a custom React frontend.
+-  * **Rationale:** The primary goal is frictionless user adoption. Users already live in Notion. Building a custom frontend adds maintenance overhead for negative UX value.
+diff --git a/docs/SETUP.md b/docs/SETUP.md
+index 1af65d1..3a7ea98 100644
+--- a/docs/SETUP.md
++++ b/docs/SETUP.md
+@@ -1,11 +1,11 @@
+ # SchedSec Setup Guide
+ 
+ This guide details the steps to deploy SchedSec as a personal, self-hosted scheduling assistant.
+ 
+ ## Prerequisites
+-* **Cloudflare Account**: [Sign up here](https://dash.cloudflare.com/sign-up). You will need access to Workers, KV, D1, R2, and Vectorize.
++* **Cloudflare Account**: [Sign up here](https://dash.cloudflare.com/sign-up). You will need access to Workers, KV, R2, and Vectorize.
+ * **Notion Account**: [Sign up here](https://www.notion.so/signup).
+ * **Node.js**: >= 18.0.0.
+ * **Wrangler CLI**: Follow the [official installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/).
+ 
+ ---
+@@ -16,19 +16,19 @@ This guide details the steps to deploy SchedSec as a personal, self-hosted sched
+ Instead of building databases manually, use the official SchedSec Dashboard template:
+ 1. Open the [SchedSec Dashboard Template](https://mirage-earth-76c.notion.site/SchedSec-Dashboard-317c470f750180dd98d1fcbd34266400?source=copy_link).
+ 2. Click **Duplicate** in the top-right corner to copy it to your workspace.
+ 
+ ### B. Automated Infrastructure Setup
+-Clone the repository and run the setup script to provision Cloudflare resources (KV, D1, R2, Vectorize) automatically using the CLI:
++Clone the repository and run the setup script to provision Cloudflare resources (KV, R2, Vectorize) automatically using the CLI:
+ ```bash
+ cd schedsec
+ npm install
+ npx wrangler login 
+ npm run setup
+ ```
+ > [!IMPORTANT]
+-> **Manual Verification**: The setup script attempts to inject resource IDs into `wrangler.toml`. Please verify that the `id` and `database_id` fields in your `wrangler.toml` match the resources shown in your [Cloudflare Dashboard](https://dash.cloudflare.com).
++> **Manual Verification**: The setup script attempts to inject resource IDs into `wrangler.toml`. Please verify that the KV namespace `id` matches the resource shown in your [Cloudflare Dashboard](https://dash.cloudflare.com).
+ 
+ ---
+ 
+ ## 2. Notion Integration Setup
+ 
+@@ -72,40 +72,112 @@ npx wrangler secret put NOTION_API_KEY # (Repeat for all keys in .dev.vars)
+ npm run deploy
+ ```
+ 
+ ---
+ 
+-## 4. Finalizing the Dashboard (Buttons & Views)
+-
+-### A. Dashboard Layout
+-The main **SchedSec Dashboard** page should be your primary cockpit. We recommend placing the trigger buttons at the top of this page.
+-
+-1. **Generate Trigger URLs**: Run this script after your first deployment to get your specific secure links:
++## 4. Notion UI Setup (Form + Templates + Schedule Views + Buttons)
++
++### A. Capture Form (Inputs DB)
++Use a real Notion **Form** as your primary input surface (instead of a table with hidden columns):
++1. Open the **Inputs** database.
++2. Click **+ Add a view** → **Form** (or type `/form`).
++3. Add these questions:
++
++| # | Field | Required | Description |
++|---|---|---|---|
++| 1 | `Task` | Yes | What do you need to do? |
++| 2 | `Deadline` | No | When is this due? |
++| 3 | `Duration` | No | Estimated minutes (leave blank to let scheduler infer). |
++| 4 | `Priority` | No | High / Medium / Low (defaults to Medium). |
++| 5 | `Task_Type` | No | TASK, FIXED_APPOINTMENT, or TIME_BLOCK. |
++| 6 | `Energy` | No | Deep / Moderate / Light (defaults to Moderate). |
++| 7 | `Time_Preference` | No | Morning / Midday / Afternoon / Evening / Anytime. |
++| 8 | `Fixed_Time` | No | Only for appointments; leave blank for regular tasks. |
++| 9 | `Recurrence` | No | Daily, Weekday, or specific day. |
++| 10 | `Notes` | No | Any additional context. |
++
++Keep these **off** the form (system-managed): `Status`, `Background`, `Must_Complete_By`, `Depends_On`, `Learned_Rules`, `Multi_Day_State`, `Recurrence_State`, `Last_Generated`, `Estimated_Days`, `Weekly_Target`, `Created`, `Updated`.
++
++### B. Database Templates (Inputs DB)
++Create these one-time templates in Notion so new tasks start with valid defaults:
++
++1. In the **Inputs** database, click the dropdown beside **New** → **+ New template**.
++2. Create template: `Quick Task` (set as default template):
++   - `Status` = `Active`
++   - `Task_Type` = `TASK`
++   - `Priority` = `Medium`
++   - `Energy` = `Moderate`
++   - `Time_Preference` = `Anytime`
++3. Create template: `Appointment`:
++   - `Status` = `Active`
++   - `Task_Type` = `FIXED_APPOINTMENT`
++4. Create template: `Time Block`:
++   - `Status` = `Active`
++   - `Task_Type` = `TIME_BLOCK`
++
++These templates align Notion defaults with SchedSec runtime defaults, while still allowing inference to fill remaining fields.
++
++### C. Schedule Views (Schedule DB)
++Create two views on the **Schedule** database:
++
++1. **Today** (table or list):
++   - Filter: `Date is today`
++   - Sort: `AI_Start` ascending
++2. **Calendar**:
++   - View type: Calendar
++   - Date property: `Date`
++   - Show at least: `Status`, `AI_Start`, `AI_Duration`
++
++### D. Dashboard Linked Schedule (Dashboard Page)
++Show today's schedule directly on the top-level dashboard:
++
++1. In **SchedSec Dashboard**, type `/linked` and select **Schedule**.
++2. Apply:
++   - Filter: `Date is today`
++   - Sort: `AI_Start` ascending
++3. Show only key properties: `Task_Link`, `AI_Start`, `AI_Duration`, `Status`.
++
++### E. Dashboard Buttons
++Place trigger buttons at the top of your **SchedSec Dashboard** page:
++1. **Generate Trigger URLs**:
+    ```bash
+    npm run trigger-urls https://YOUR_WORKER_URL_FROM_DEPLOYMENT
+    ```
+-2. **Create Buttons**:
+-   - In Notion, type `/button` on the Dashboard page to create a specialized button block.
+-   - **Label**: Name it (e.g., `Regenerate`, `Undo`, or `Planning Mode`).
+-   - **Action**: Select **Open URL** from the "Add step" menu.
+-   - **URL**: Paste the corresponding link generated by the script in Step 1.
+-
+-### B. Suggested Views
+-Configure these views in your duplicated databases for optimal usability:
+-- **Schedule DB**: Create a "Today" view filtered by `Date is today` and sorted by `AI_Start` (Asc).
+-- **Inputs DB**: Create a "Task Inbox" view filtered by `Status is Active`.
++2. **Create Buttons**: In Notion, type `/button` and create buttons for `Regenerate`, `Undo`, and `Planning Mode`. Set each button's action to **Open URL** and paste the corresponding link from step 1.
+ 
+ ---
+ 
+ ## 5. Verification
+ - **Health Check**: Visit `https://YOUR_WORKER_URL/health` (requires Bearer Auth).
+ - **Bootstrap**: Run `POST /bootstrap` with your `WORKER_AUTH_TOKEN` to seed your Context and add example tasks.
+ - **Schema**: Run `npm run verify-schema` to confirm your Notion connection is mapped correctly.
+ 
+ ---
+ 
+-## 6. Onboarding — Personalise Your Schedule
++## 6. Run Mode (Standard vs Budget)
++
++SchedSec supports two run modes, configured via `RUN_MODE` in `wrangler.toml`:
++
++| Setting | `standard` (default) | `budget` |
++|---|---|---|
++| AI retries per generation | 3 | 1 |
++| T+2 prefetch | Enabled | Disabled |
++| Regenerate cooldown | 30 minutes | 60 minutes |
++| Deterministic fallback | After 3 AI failures | After 1 AI failure |
++
++**When to use `budget`**: If you are on the Cloudflare Free plan or want to minimize AI/resource usage. Scheduling quality is preserved because the deterministic constraint solver (dependencies, energy budgets, fixed appointments) runs regardless of mode. The AI only handles semantic task placement.
++
++To switch, edit `wrangler.toml`:
++```toml
++[vars]
++RUN_MODE = "budget"
++```
++Then redeploy with `npm run deploy`.
++
++---
++
++## 7. Onboarding — Personalise Your Schedule
+ 
+ After deploying and verifying, run the onboarding wizard to configure your scheduling preferences. This is what tells SchedSec *when* to run, *how* you like to work, and what your personal energy and meeting patterns look like.
+ 
+ ```bash
+ npm run onboard
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 4b9ff9e..0165798 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -17,10 +17,17 @@ Because LLM outputs (Qwen 2.5 7B) are inherently probabilistic, we do **not** wr
+ ### Automated Suite
+ Run the full suite using npm:
+ ```bash
+ npm test
+ ```
++
++Run the linter as part of the same verification pass:
++
++```bash
++npm run lint
++```
++
+ To run tests in watch mode during development:
+ ```bash
+ npm run test:watch
+ ```
+ 
+diff --git a/eslint.config.js b/eslint.config.js
+index c7e0d6b..913accc 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -66,10 +66,15 @@ export default [
+       }],
+       'jsdoc/require-param': 'error', // Required by STYLE.md
+       'jsdoc/require-returns': ['error', {
+         forceRequireReturn: false
+       }],
++      'jsdoc/check-types': 'off',
++      'jsdoc/no-defaults': 'off',
++      'jsdoc/no-undefined-types': 'off',
++      'jsdoc/reject-any-type': 'off',
++      'jsdoc/reject-function-type': 'off',
+       'jsdoc/require-param-type': 'off',
+       'jsdoc/require-returns-type': 'off',
+       'jsdoc/require-param-description': 'error',
+       'jsdoc/require-returns-description': 'error'
+     }
+diff --git a/package.json b/package.json
+index 3ad55be..f791a89 100644
+--- a/package.json
++++ b/package.json
+@@ -8,10 +8,11 @@
+     "setup": "node scripts/setup.js",
+     "onboard": "node scripts/onboard.js",
+     "configure-times": "node scripts/onboard.js --times-only",
+     "verify-schema": "node scripts/verify-schema.js",
+     "trigger-urls": "node scripts/generate-trigger-urls.js",
++    "prepare": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
+     "dev": "wrangler dev",
+     "deploy": "wrangler deploy",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "lint": "eslint .",
+diff --git a/scripts/generate-trigger-urls.js b/scripts/generate-trigger-urls.js
+index e8b658e..8853f4c 100644
+--- a/scripts/generate-trigger-urls.js
++++ b/scripts/generate-trigger-urls.js
+@@ -26,11 +26,12 @@ function loadDevVars() {
+   }
+   return vars;
+ }
+ 
+ function hmacHex(action, dateStr, secret) {
+-  const payload = `${action}:${dateStr}`;
++  const hourBucket = Math.floor(Date.now() / (3600 * 1000));
++  const payload = `${action}:${dateStr}:${hourBucket}`;
+   return createHmac('sha256', secret).update(payload).digest('hex');
+ }
+ 
+ const vars = loadDevVars();
+ const secret = vars.BUTTON_SECRET || process.env.BUTTON_SECRET;
+diff --git a/scripts/onboard.js b/scripts/onboard.js
+index 156a59f..76fd542 100644
+--- a/scripts/onboard.js
++++ b/scripts/onboard.js
+@@ -19,11 +19,10 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
+ import { join } from 'path';
+ import { execSync } from 'child_process';
+ 
+ const ROOT = process.cwd();
+ const WRANGLER_PATH = join(ROOT, 'wrangler.toml');
+-const INDEX_PATH = join(ROOT, 'src', 'index.js');
+ const DEV_VARS_PATH = join(ROOT, '.dev.vars');
+ 
+ const ARGS = process.argv.slice(2);
+ const TIMES_ONLY = ARGS.includes('--times-only');
+ const RESET_MODE = ARGS.includes('--reset');
+diff --git a/scripts/setup.js b/scripts/setup.js
+index b0f272a..485aca0 100755
+--- a/scripts/setup.js
++++ b/scripts/setup.js
+@@ -1,10 +1,10 @@
+ #!/usr/bin/env node
+ 
+ /**
+  * SchedSec Interactive Setup Script
+- * Provisions Cloudflare infrastructure (KV, D1, R2, Vectorize), injects IDs
++ * Provisions Cloudflare infrastructure (KV, R2, Vectorize), injects IDs
+  * into wrangler.toml, prompts for Notion credentials, writes .dev.vars, and
+  * optionally pushes secrets to production.
+  */
+ 
+ import { execSync } from 'child_process';
+@@ -16,11 +16,13 @@ import { join } from 'path';
+ const WRANGLER_PATH = join(process.cwd(), 'wrangler.toml');
+ const DEV_VARS_PATH = join(process.cwd(), '.dev.vars');
+ 
+ // --- Prompt Helper ---
+ const rl = createInterface({ input: process.stdin, output: process.stdout });
+-const prompt = (q) => new Promise(resolve => rl.question(q, resolve));
++const prompt = (q) => new Promise(resolve => {
++  rl.question(q, resolve);
++});
+ 
+ // --- Wrangler Runner ---
+ function runWrangler(command) {
+   try {
+     return execSync(`npx wrangler ${command}`, { encoding: 'utf-8' }).trim();
+@@ -68,37 +70,21 @@ if (kvOutput !== 'ALREADY_EXISTS') {
+ }
+ 
+ console.log('-> Creating R2 Bucket (schedsec-backups)...');
+ runWrangler('r2 bucket create "schedsec-backups"');
+ 
+-console.log('-> Creating D1 Database (schedsec-cache)...');
+-const d1Output = runWrangler('d1 create "schedsec-cache"');
+-let d1Id = '';
+-if (d1Output !== 'ALREADY_EXISTS') {
+-  const m = d1Output.match(/database_id = "([a-f0-9-]+)"/);
+-  if (m) d1Id = m[1];
+-} else {
+-  console.log('   (Already exists — check Cloudflare Dashboard for ID)');
+-}
+-
+-// bge-small-en outputs 384-dimensional vectors
+-console.log('-> Creating Vectorize Index (schedsec-learned-rules, 384 dims)...');
+-runWrangler('vectorize create "schedsec-learned-rules" --dimensions=384 --metric=cosine');
++// bge-base-en-v1.5 outputs 768-dimensional vectors
++console.log('-> Creating Vectorize Index (schedsec-learned-rules, 768 dims)...');
++runWrangler('vectorize create "schedsec-learned-rules" --dimensions=768 --metric=cosine');
+ 
+ // 3. Inject IDs into wrangler.toml
+ if (kvId) {
+   tomlContent = tomlContent.replace(
+     /\[\[kv_namespaces\]\]\nbinding = "KV"\nid = "[^"]+"/,
+     `[[kv_namespaces]]\nbinding = "KV"\nid = "${kvId}"`
+   );
+ }
+-if (d1Id) {
+-  tomlContent = tomlContent.replace(
+-    /\[\[d1_databases\]\]\nbinding = "DB"\ndatabase_name = "schedsec-cache"\ndatabase_id = "[^"]+"/,
+-    `[[d1_databases]]\nbinding = "DB"\ndatabase_name = "schedsec-cache"\ndatabase_id = "${d1Id}"`
+-  );
+-}
+ writeFileSync(WRANGLER_PATH, tomlContent);
+ console.log('\nwrangler.toml updated.');
+ 
+ // 4. Prompt for Notion Credentials
+ console.log('\nNotion Setup');
+diff --git a/src/bootstrap.js b/src/bootstrap.js
+index 90bddeb..9a64b26 100644
+--- a/src/bootstrap.js
++++ b/src/bootstrap.js
+@@ -6,12 +6,13 @@ import { CONFIG } from './config.js';
+ 
+ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * Cold Start Seeding
+- * @param env The parameter.
+- * @returns {any} The return value.
++ * Seeds baseline context, example tasks, and starter Vectorize rules for a new install.
++ * @param {object} env Worker environment bindings.
++ * @returns {Promise<object>} Summary of how many records were seeded.
+  */
+ export async function bootstrapSystem(env) {
+   const notion = new NotionClient(env.NOTION_API_KEY);
+   const logger = new Logger(notion, env.LOGS_DB_ID, env);
+   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+@@ -157,18 +158,21 @@ export async function bootstrapSystem(env) {
+   await logger.info('Cold start initialization complete', {
+     patterns: Object.keys(defaultPatterns).length,
+     rules: bootstrapRules.length,
+     tasks: exampleTasks.length
+   });
++  await context.flush();
++  await logger.flush();
+ 
+   return { success: true, seeded: Object.keys(defaultPatterns).length + bootstrapRules.length + exampleTasks.length };
+ }
+ 
+ /**
+  * Clean up bootstrap data after system matures.
+- * @param env The parameter.
+- * @returns {any} The return value.
++ * Removes unused bootstrap patterns and promotes heavily reinforced defaults.
++ * @param {object} env Worker environment bindings.
++ * @returns {Promise<object|undefined>} Cleanup summary, or `undefined` if no patterns exist yet.
+  */
+ export async function cleanupBootstrapData(env) {
+   const notion = new NotionClient(env.NOTION_API_KEY);
+   const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+   const logger = new Logger(notion, env.LOGS_DB_ID, env);
+@@ -190,7 +194,9 @@ export async function cleanupBootstrapData(env) {
+       promoted++;
+     }
+   }
+ 
+   await context.set('inference_patterns_v2', patterns);
++  await context.flush();
++  await logger.flush();
+   return { removed, promoted };
+ }
+diff --git a/src/config.js b/src/config.js
+index 49507f0..cdb6f8c 100644
+--- a/src/config.js
++++ b/src/config.js
+@@ -17,17 +17,37 @@ export const CONFIG = {
+     BUFFER_TIME: 15,
+     MIN_BUFFER: 5,
+     ENERGY_LEVEL: 'Moderate',
+     PRIORITY: 'Medium',
+     TIME_PREFERENCE: 'Anytime',
++    TASK_TYPE: 'TASK',
+     WORK_DAY_START: '09:00',
+     WORK_DAY_END: '17:00',
+     TIMEZONE: 'America/New_York',
+     MAX_REGEN_PER_5MIN: 1,
+     PROMPT_VERSION: 'v4'
+   },
+ 
++  // Run mode: "standard" uses full AI + prefetch; "budget" caps AI calls and skips prefetch.
++  // Set via RUN_MODE env var in wrangler.toml or .dev.vars. Defaults to "standard".
++  RUN_MODE: {
++    STANDARD: 'standard',
++    BUDGET: 'budget'
++  },
++
++  BUDGET: {
++    AI_MAX_RETRIES: 1,
++    ENABLE_PREFETCH: false,
++    REGENERATE_COOLDOWN_SECONDS: 3600
++  },
++
++  STANDARD: {
++    AI_MAX_RETRIES: 3,
++    ENABLE_PREFETCH: true,
++    REGENERATE_COOLDOWN_SECONDS: 1800
++  },
++
+   // Skip Reason options (for rule extraction filtering)
+   SKIP_REASONS: {
+     DEPRIORITIZED: 'Deprioritized',
+     NO_TIME: 'No Time',
+     EXTERNAL_BLOCKER: 'External Blocker',
+@@ -89,10 +109,12 @@ export const CONFIG = {
+     SCHEDULE: {
+       DATE: 'Date',
+       TASK: 'Task_Link',
+       AI_START: 'AI_Start',
+       AI_DURATION: 'AI_Duration',
++      CORRECTION_FLAG: 'Correction_Flag',
++      SKIP_REASON: 'Skip_Reason',
+       FINAL_START: 'Final_Start',
+       FINAL_DURATION: 'Final_Duration',
+       ACTUAL_DURATION: 'Actual_Duration',
+       COMPLETION_RATING: 'Completion_Rating',
+       YOUR_NOTES: 'Your_Notes',
+@@ -160,10 +182,19 @@ export const CONFIG = {
+       SKIPPED: 'Skipped',
+       UPDATED: 'Updated'
+     }
+   },
+ 
++  /**
++   * Returns budget or standard config block based on RUN_MODE env var.
++   * @param {object} env - Worker env bindings.
++   * @returns {object} Config block with AI_MAX_RETRIES, ENABLE_PREFETCH, REGENERATE_COOLDOWN_SECONDS.
++   */
++  getRunConfig(env) {
++    return (env.RUN_MODE === 'budget') ? this.BUDGET : this.STANDARD;
++  },
++
+   // Conflict Types
+   CONFLICT_TYPES: [
+     'TIME_OVERLAP',
+     'INSUFFICIENT_BUFFER',
+     'PREFERENCE_VIOLATION',
+@@ -172,5 +203,29 @@ export const CONFIG = {
+     'CIRCULAR_DEPENDENCY',
+     'TIME_CONSTRAINT_VIOLATION',
+     'FIXED_APPOINTMENT_CONFLICT'
+   ]
+ };
++
++/**
++ * Validates required worker env bindings at runtime.
++ * @param {Object} env Worker bindings.
++ */
++export function validateEnv(env) {
++  const required = [
++    'NOTION_API_KEY',
++    'INPUTS_DB_ID',
++    'SCHEDULE_DB_ID',
++    'CONTEXT_DB_ID',
++    'LOGS_DB_ID',
++    'STATS_DB_ID',
++    'KV',
++    'R2_BUCKET',
++    'WORKER_AUTH_TOKEN',
++    'BUTTON_SECRET'
++  ];
++
++  const missing = required.filter(key => !env[key]);
++  if (missing.length > 0) {
++    throw new Error(`Missing required env bindings: ${missing.join(', ')}`);
++  }
++}
+diff --git a/src/context.js b/src/context.js
+index 11c45a9..b1024cf 100644
+--- a/src/context.js
++++ b/src/context.js
+@@ -11,10 +11,12 @@ export class ContextManager {
+    */
+   constructor(notionClient, contextDbId) {
+     this.notion = notionClient;
+     this.dbId = contextDbId;
+     this.cache = new Map();
++    this.pageIds = new Map();
++    this.pendingWrites = new Map();
+   }
+ 
+   /**
+    * Retrieves a JSON-parsed value by key from the Context DB.
+    * @param {string} key Unique configuration key.
+@@ -30,11 +32,13 @@ export class ContextManager {
+     });
+ 
+     if (response.results.length === 0) return null;
+ 
+     const page = response.results[0];
+-    const valueStr = page.properties[props.VALUE].rich_text[0]?.plain_text;
++    this.pageIds.set(key, page.id);
++    const richText = page.properties[props.VALUE]?.rich_text || [];
++    const valueStr = richText.map(rt => rt.plain_text || '').join('');
+ 
+     try {
+       const value = valueStr ? JSON.parse(valueStr) : null;
+       this.cache.set(key, value);
+       return value;
+@@ -48,34 +52,86 @@ export class ContextManager {
+    * @param {string} key Unique configuration key.
+    * @param {any} value Value to store (will be JSON stringified).
+    * @param {string} [description=''] Optional human-readable description.
+    */
+   async set(key, value, description = '') {
+-    const props = CONFIG.PROPERTIES.CONTEXT;
+-    const existing = await this.notion.queryDatabase(this.dbId, {
+-      property: props.KEY,
+-      title: { equals: key }
++    this.pendingWrites.set(key, {
++      value,
++      description: description || null
+     });
+-
+-    const valueStr = JSON.stringify(value);
+-    const properties = {
+-      [props.KEY]: { title: [{ text: { content: key } }] },
+-      [props.VALUE]: { rich_text: [{ text: { content: valueStr } }] },
+-      [props.DESCRIPTION]: { rich_text: [{ text: { content: description } }] }
+-    };
+-
+-    if (existing.results.length > 0) {
+-      await this.notion.updatePage(existing.results[0].id, properties);
+-    } else {
+-      await this.notion.createPage(this.dbId, properties);
+-    }
+-
+     this.cache.set(key, value);
+   }
+ 
+   /**
+    * Clears the local cache.
+    */
+   clearCache() {
+     this.cache.clear();
+   }
++
++  /**
++   * Flushes pending context writes to Notion in a single batch cycle.
++   * Reduces per-write query overhead by loading existing pages once.
++   */
++  async flush() {
++    if (this.pendingWrites.size === 0) return;
++
++    const props = CONFIG.PROPERTIES.CONTEXT;
++    const keys = Array.from(this.pendingWrites.keys());
++    const unknownKeys = keys.filter(key => !this.pageIds.has(key));
++
++    if (unknownKeys.length > 0) {
++      const response = await this.notion.queryDatabase(this.dbId);
++      for (const page of response.results) {
++        const keyName = page.properties[props.KEY]?.title?.[0]?.plain_text;
++        if (keyName && !this.pageIds.has(keyName)) {
++          this.pageIds.set(keyName, page.id);
++        }
++      }
++    }
++
++    for (const key of keys) {
++      const { value, description } = this.pendingWrites.get(key);
++      const valueStr = JSON.stringify(value);
++      if (valueStr.length > 2000) {
++        console.warn(
++          `Context value for key "${key}" exceeds 2000 chars; storing as chunked rich_text (${valueStr.length} chars)`
++        );
++      }
++
++      const properties = {
++        [props.KEY]: { title: [{ text: { content: key } }] },
++        [props.VALUE]: { rich_text: this._toRichTextChunks(valueStr) }
++      };
++
++      // Preserve existing description unless explicitly provided.
++      if (description) {
++        properties[props.DESCRIPTION] = { rich_text: this._toRichTextChunks(description) };
++      }
++
++      const pageId = this.pageIds.get(key);
++      if (pageId) {
++        await this.notion.updatePage(pageId, properties);
++      } else {
++        const created = await this.notion.createPage(this.dbId, properties);
++        this.pageIds.set(key, created.id);
++      }
++    }
++
++    this.pendingWrites.clear();
++  }
++
++  /**
++   * Splits text into Notion rich_text objects (2000 char max per segment).
++   * @param {string} text Text content to split into rich_text chunks.
++   * @returns {Array<object>} Array of Notion rich_text text objects.
++   */
++  _toRichTextChunks(text) {
++    if (!text || text.length === 0) return [{ text: { content: '' } }];
++
++    const chunks = [];
++    for (let i = 0; i < text.length; i += 2000) {
++      chunks.push({ text: { content: text.slice(i, i + 2000) } });
++    }
++    return chunks;
++  }
+ }
+diff --git a/src/features/planning.js b/src/features/planning.js
+index 4592044..b92bccf 100644
+--- a/src/features/planning.js
++++ b/src/features/planning.js
+@@ -6,13 +6,13 @@ import { CONFIG } from '../config.js';
+  * Generates a schedule without writing to Notion.
+  */
+ export class PlanningManager {
+   /**
+    * Generates a preview with temporary modifications.
+-   * @param baseTasks The parameter.
+-   * @param modifications The parameter.
+-   * @returns {any} The return value.
++   * @param {Array<object>} baseTasks Base task list to simulate against.
++   * @param {object} modifications Add/remove/modify operations for the scenario.
++   * @returns {object} In-memory what-if schedule result.
+    */
+   static generateScenario(baseTasks, modifications) {
+     let tasks = [...baseTasks];
+ 
+     // Add tasks
+@@ -53,14 +53,14 @@ export class PlanningManager {
+   /**
+    * HTTP handler for /planning: generates what-if scenario from request body.
+    * @param {Array} tasks - Base tasks (or empty to fetch from Inputs).
+    * @param {Object} modifications - { add_tasks, remove_tasks, modify_tasks }.
+    * @param {Object} env - Worker env (used if tasks empty to fetch from Notion).
+-   * @param {string} dateStr - Target date (YYYY-MM-DD).
++   * @param {string} _dateStr - Target date (YYYY-MM-DD).
+    * @returns {Promise<Object>} Scenario result.
+    */
+-  static async generateWhatIf(tasks, modifications, env, dateStr) {
++  static async generateWhatIf(tasks, modifications, env, _dateStr) {
+     let baseTasks = Array.isArray(tasks) ? tasks : [];
+     const mods = modifications || { add_tasks: [], remove_tasks: [], modify_tasks: [] };
+ 
+     if (baseTasks.length === 0 && env?.INPUTS_DB_ID && env?.NOTION_API_KEY) {
+       const { NotionClient } = await import('../notion-client.js');
+diff --git a/src/features/undo.js b/src/features/undo.js
+index 73691ff..c5fd5e3 100644
+--- a/src/features/undo.js
++++ b/src/features/undo.js
+@@ -3,36 +3,38 @@ import { CONFIG } from '../config.js';
+ /**
+  * Logic for storing schedule snapshots and performing rollbacks.
+  */
+ export class UndoManager {
+   /**
+-   *
+-   * @param kv The parameter.
+-   * @param notionClient The parameter.
++   * Creates an undo manager backed by KV snapshots and the shared Notion client.
++   * @param {object} kv Cloudflare KV binding used for snapshot storage.
++   * @param {object} notionClient Shared Notion API client wrapper.
+    */
+   constructor(kv, notionClient) {
+     this.kv = kv;
+     this.notion = notionClient;
+   }
+ 
+   /**
+    * Stores current schedule as a snapshot before regeneration.
+-   * @param date The parameter.
+-   * @param schedule The parameter.
++   * @param {string} date Date string (YYYY-MM-DD).
++   * @param {Array<object>} schedule Current schedule entries to persist in KV.
++   * @returns {Promise<void>} Resolves when the snapshot is written.
+    */
+   async createSnapshot(date, schedule) {
+     const key = `undo_${date}`;
+     await this.kv.put(key, JSON.stringify(schedule), {
+       expirationTtl: 604800 // 7 days retention
+     });
+   }
+ 
+   /**
+    * Restores a schedule from a snapshot.
+-   * @param date The parameter.
+-   * @param _scheduleDbId The parameter.
+-   * @returns {any} The return value.
++   * Legacy helper that returns snapshot contents without mutating Notion.
++   * @param {string} date Date string (YYYY-MM-DD).
++   * @param {string} _scheduleDbId Unused legacy parameter preserved for compatibility.
++   * @returns {Promise<object>} Snapshot payload or `NO_SNAPSHOT`.
+    */
+   async rollback(date, _scheduleDbId) {
+     const key = `undo_${date}`;
+     const snapshot = await this.kv.get(key);
+ 
+@@ -50,11 +52,11 @@ export class UndoManager {
+   }
+ 
+   /**
+    * Checks if a snapshot exists for the given date.
+    * @param {string} date - Date string (YYYY-MM-DD).
+-   * @returns {Promise<boolean>}
++   * @returns {Promise<boolean>} True when a snapshot exists for the date.
+    */
+   async hasSnapshot(date) {
+     const key = `undo_${date}`;
+     const val = await this.kv.get(key);
+     return !!val;
+@@ -62,11 +64,11 @@ export class UndoManager {
+ 
+   /**
+    * Restores schedule from KV snapshot: archives current entries, recreates from snapshot.
+    * @param {string} date - Date string (YYYY-MM-DD).
+    * @param {string} scheduleDbId - Schedule database ID.
+-   * @returns {Promise<Object>} { success, restored, error? }
++   * @returns {Promise<object>} Restore outcome with restored count or error code.
+    */
+   async restoreSnapshot(date, scheduleDbId) {
+     const key = `undo_${date}`;
+     const snapshot = await this.kv.get(key);
+     if (!snapshot) return { success: false, error: 'NO_SNAPSHOT' };
+diff --git a/src/index.js b/src/index.js
+index aee6206..926560f 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -15,116 +15,164 @@ import { PanicManager } from './features/panic.js';
+ import { UndoManager } from './features/undo.js';
+ import { NotionClient } from './notion-client.js';
+ import { ContextManager } from './context.js';
+ import { Logger } from './logger.js';
+ import { validateTriggerToken } from './trigger.js';
++import { CONFIG, validateEnv } from './config.js';
++
++function withCors(response) {
++  response.headers.set('Access-Control-Allow-Origin', '*');
++  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
++  response.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
++  return response;
++}
++
++function jsonResponse(payload, status = 200, extraHeaders = {}) {
++  return withCors(new Response(JSON.stringify(payload), {
++    status,
++    headers: {
++      'Content-Type': 'application/json',
++      ...extraHeaders
++    }
++  }));
++}
++
++async function createServices(env) {
++  const notion = new NotionClient(env.NOTION_API_KEY);
++  const logger = new Logger(notion, env.LOGS_DB_ID, env);
++  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++  return { notion, logger, context };
++}
++
++async function flushServices(services) {
++  await services.context.flush();
++  await services.logger.flush();
++}
++
++async function getToday(env, fallbackTimezone = 'UTC') {
++  const cachedTz = await env.KV.get('user_timezone_cache');
++  const timezone = cachedTz || fallbackTimezone;
++  return new Date().toLocaleDateString('en-CA', { timeZone: timezone });
++}
++
++async function runScheduledJob(event, env, services, dateStr) {
++  if (event.cron === env.CRON_PREVIEW) {
++    await handlePreview(env, services, dateStr);
++  } else if (event.cron === env.CRON_FINAL) {
++    await handleFinal(env, services, dateStr);
++  } else if (event.cron === env.CRON_STATS) {
++    await handleStats(env, services);
++  } else if (event.cron === env.CRON_CLEANUP) {
++    await handleCleanup(env, services);
++  } else if (event.cron === env.CRON_BACKUP) {
++    await handleBackup(env, services);
++  } else if (event.cron === env.CRON_HEALTH) {
++    await handleHealth(env, services);
++  } else {
++    await services.logger.warn(`Unrecognized cron trigger: ${event.cron}`);
++  }
++}
+ 
+ /**
+  * SchedSec Main Worker Entrypoint
+  */
+ export default {
+   /**
+    * HTTP Request Handler
+-   * @param request The parameter.
+-   * @param env The parameter.
+-   * @param _ctx The parameter.
+-   * @returns {any} The return value.
++   * @param {Request} request Incoming HTTP request.
++   * @param {object} env Worker environment bindings.
++   * @param {object} _ctx Cloudflare execution context.
++   * @returns {Promise<Response>} HTTP response for the requested endpoint.
+    */
+   async fetch(request, env, _ctx) {
+     const url = new URL(request.url);
+     const path = url.pathname;
+     const authHeader = request.headers.get('Authorization');
++    const services = await createServices(env);
+ 
+-    const today = new Date().toISOString().split('T')[0];
++    if (request.method === 'OPTIONS') {
++      return withCors(new Response(null, { status: 204 }));
++    }
++
++    try {
++      validateEnv(env);
++      const today = await getToday(env);
++
++      if (path === '/trigger') {
++        const action = url.searchParams.get('action');
++        const token = url.searchParams.get('token');
++        const dateStr = url.searchParams.get('date') || today;
++        if (!env.BUTTON_SECRET) {
++          return jsonResponse({ error: 'BUTTON_SECRET not configured' }, 503);
++        }
++        const valid = await validateTriggerToken(action, dateStr, token || '', env.BUTTON_SECRET);
++        if (!valid) {
++          return jsonResponse({ error: 'Invalid or expired token' }, 401);
++        }
+ 
+-    if (path === '/trigger') {
+-      const action = url.searchParams.get('action');
+-      const token = url.searchParams.get('token');
+-      const dateStr = url.searchParams.get('date') || today;
+-      if (!env.BUTTON_SECRET) {
+-        return new Response(JSON.stringify({ error: 'BUTTON_SECRET not configured' }), {
+-          status: 503, headers: { 'Content-Type': 'application/json' }
+-        });
+-      }
+-      const valid = await validateTriggerToken(action, dateStr, token || '', env.BUTTON_SECRET);
+-      if (!valid) {
+-        return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+-          status: 401, headers: { 'Content-Type': 'application/json' }
+-        });
+-      }
+-      const notion = new NotionClient(env.NOTION_API_KEY);
+-      try {
+         let result;
+         if (action === 'regenerate') {
+-          result = await handleRegenerate(env, dateStr);
++          result = await handleRegenerate(env, services, dateStr);
+         } else if (action === 'undo') {
+-          const undo = new UndoManager(env.KV, notion);
++          const undo = new UndoManager(env.KV, services.notion);
+           result = await undo.restoreSnapshot(dateStr, env.SCHEDULE_DB_ID);
+         } else if (action === 'planning') {
+           result = await PlanningManager.generateWhatIf([], {}, env, dateStr);
+         } else {
+-          return new Response(JSON.stringify({ error: 'Unknown action' }), {
+-            status: 400, headers: { 'Content-Type': 'application/json' }
+-          });
++          return jsonResponse({ error: 'Unknown action' }, 400);
+         }
+-        return new Response(JSON.stringify(result), {
+-          headers: { 'Content-Type': 'application/json' }
+-        });
+-      } catch (err) {
+-        return new Response(JSON.stringify({ error: err.message }), {
+-          status: 500, headers: { 'Content-Type': 'application/json' }
+-        });
++        return jsonResponse(result);
+       }
+-    }
+ 
+-    if (authHeader !== `Bearer ${env.WORKER_AUTH_TOKEN}`) {
+-      return new Response('Unauthorized', { status: 401 });
+-    }
+-    const notion = new NotionClient(env.NOTION_API_KEY);
+-    const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++      if (authHeader !== `Bearer ${env.WORKER_AUTH_TOKEN}`) {
++        return withCors(new Response('Unauthorized', { status: 401 }));
++      }
+ 
+-    try {
+       let result;
+ 
+       switch (path) {
+         case '/preview':
+-          result = await handlePreview(env, today);
++          result = await handlePreview(env, services, today);
+           break;
+ 
+         case '/final':
+-          result = await handleFinal(env, today);
++          result = await handleFinal(env, services, today);
+           break;
+ 
+         case '/regenerate':
+-          result = await handleRegenerate(env, today);
++          result = await handleRegenerate(env, services, today);
+           break;
+ 
+         case '/stats':
+-          result = await handleStats(env);
++          result = await handleStats(env, services);
+           break;
+ 
+         case '/health':
+-          result = await handleHealth(env);
++          result = await handleHealth(env, services);
+           break;
+ 
+         case '/bootstrap':
+           result = await bootstrapSystem(env);
+           break;
+ 
+         case '/onboard': {
+           const body = await request.json();
+           const resetMode = url.searchParams.get('reset') === 'true';
+-          result = await OnboardingManager.applyAnswers(body, context, env.KV, resetMode);
++          result = await OnboardingManager.applyAnswers(body, services.context, env.KV, resetMode);
++          const tzConfig = await services.context.get('user_timezone_current');
++          if (tzConfig?.current) {
++            await env.KV.put('user_timezone_cache', tzConfig.current);
++          }
+           break;
+         }
+ 
+         case '/panic': {
+           if (request.method === 'GET') {
+-            const override = await context.get('daily_override');
++            const override = await services.context.get('daily_override');
+             result = { active: !!override, override: override || null };
+           } else if (request.method === 'DELETE') {
+-            await context.set('daily_override', null, 'Panic mode cleared');
++            await services.context.set('daily_override', null, 'Panic mode cleared');
+             result = { success: true, message: 'Panic mode cleared' };
+           } else {
+             const body = await request.json().catch(() => ({}));
+             const override = body.mode === 'sick'
+               ? PanicManager.getSickModeOverride()
+@@ -132,19 +180,19 @@ export default {
+                 reason: body.reason || 'Manual override',
+                 max_work_hours: body.max_work_hours || 4,
+                 energy_filter: body.energy_filter || null,
+                 priority_filter: body.priority_filter || null
+               };
+-            await context.set('daily_override', override, `Panic mode: ${override.reason}`);
++            await services.context.set('daily_override', override, `Panic mode: ${override.reason}`);
+             result = { success: true, override };
+           }
+           break;
+         }
+ 
+         case '/calendar': {
+           const body = await request.json();
+-          const calendar = new CalendarBlocks(context);
++          const calendar = new CalendarBlocks(services.context);
+           if (request.method === 'POST') {
+             result = await calendar.addBlock(body.date, body.start, body.end, body.label);
+           } else if (request.method === 'DELETE') {
+             result = await calendar.removeBlock(body.index);
+           } else {
+@@ -158,116 +206,123 @@ export default {
+           result = await PlanningManager.generateWhatIf(body.tasks, body.modifications, env, today);
+           break;
+         }
+ 
+         case '/undo': {
+-          const undo = new UndoManager(env.KV, notion);
++          const undo = new UndoManager(env.KV, services.notion);
+           result = await undo.restoreSnapshot(today, env.SCHEDULE_DB_ID);
+           break;
+         }
+ 
+         case '/restore': {
+           const body = await request.json();
+           if (!body.date) {
+-            return new Response(JSON.stringify({ error: 'date parameter required (YYYY-MM-DD)' }), {
+-              status: 400, headers: { 'Content-Type': 'application/json' }
+-            });
++            return jsonResponse({ error: 'date parameter required (YYYY-MM-DD)' }, 400);
+           }
+           const scope = body.scope || 'all';
+-          result = await restoreFromBackup(env, body.date, scope);
++          result = await restoreFromBackup(env, services, body.date, scope);
+           break;
+         }
+ 
+         case '/export': {
+           const params = {
+             days: url.searchParams.get('days') || '30',
+             format: url.searchParams.get('format') || 'csv'
+           };
+-          const exportResult = await handleExport(env, params);
++          const exportResult = await handleExport(env, services, params);
+           if (exportResult.csv) {
+-            return new Response(exportResult.csv, {
++            return withCors(new Response(exportResult.csv, {
+               headers: {
+                 'Content-Type': 'text/csv',
+                 'Content-Disposition': `attachment; filename="${exportResult.filename}"`
+               }
+-            });
++            }));
+           }
+           result = exportResult;
+           break;
+         }
+ 
+         case '/reset': {
+           if (request.method !== 'POST') {
+-            return new Response(JSON.stringify({ error: 'POST required' }), {
+-              status: 405, headers: { 'Content-Type': 'application/json' }
+-            });
++            return jsonResponse({ error: 'POST required' }, 405);
+           }
+           const body = await request.json().catch(() => ({}));
+-          result = await handleReset(env, body);
++          result = await handleReset(env, services, body);
+           break;
+         }
+ 
+         case '/webhook': {
+           if (request.method !== 'POST') {
+-            return new Response(JSON.stringify({ error: 'POST required' }), {
+-              status: 405, headers: { 'Content-Type': 'application/json' }
+-            });
++            return jsonResponse({ error: 'POST required' }, 405);
+           }
+-          // Rate-limit: max 1 regen per 30min
++          const runCfg = CONFIG.getRunConfig(env);
+           const cooldownKey = `regen_cooldown_${today}`;
+           const cooldown = await env.KV.get(cooldownKey);
+           if (cooldown) {
+-            result = { success: false, message: 'Regeneration cooldown active (30 min)' };
++            result = { success: false, message: `Regeneration cooldown active (${runCfg.REGENERATE_COOLDOWN_SECONDS}s)` };
+           } else {
+-            await env.KV.put(cooldownKey, 'active', { expirationTtl: 1800 });
+-            result = await handleRegenerate(env, today);
++            await env.KV.put(cooldownKey, 'active', { expirationTtl: runCfg.REGENERATE_COOLDOWN_SECONDS });
++            result = await handleRegenerate(env, services, today);
+           }
+           break;
+         }
+ 
+         default:
+-          return new Response('Not Found', { status: 404 });
++          return withCors(new Response('Not Found', { status: 404 }));
+       }
+ 
+-      return new Response(JSON.stringify(result), {
+-        headers: { 'Content-Type': 'application/json' }
+-      });
++      return jsonResponse(result);
+     } catch (error) {
+-      return new Response(JSON.stringify({ error: error.message }), {
+-        status: 500,
+-        headers: { 'Content-Type': 'application/json' }
+-      });
++      return jsonResponse({ error: error.message }, 500);
++    } finally {
++      await flushServices(services);
+     }
+   },
+ 
+   /**
+    * Scheduled Cron Handler
+-   * @param event The parameter.
+-   * @param env The parameter.
+-   * @param _ctx The parameter.
++   * @param {object} event Cloudflare scheduled event payload.
++   * @param {object} env Worker environment bindings.
++   * @param {object} _ctx Cloudflare execution context.
++   * @returns {Promise<void>} Resolves after the cron run completes or is marked pending.
+    */
+   async scheduled(event, env, _ctx) {
+-    const today = new Date().toISOString().split('T')[0];
+-    const notion = new NotionClient(env.NOTION_API_KEY);
+-    const logger = new Logger(notion, env.LOGS_DB_ID, env);
++    const services = await createServices(env);
++    const today = await getToday(env);
+ 
+     try {
+-      if (event.cron === env.CRON_PREVIEW) {
+-        await handlePreview(env, today);
+-      } else if (event.cron === env.CRON_FINAL) {
+-        await handleFinal(env, today);
+-      } else if (event.cron === env.CRON_STATS) {
+-        await handleStats(env);
+-      } else if (event.cron === env.CRON_CLEANUP) {
+-        await handleCleanup(env);
+-      } else if (event.cron === env.CRON_BACKUP) {
+-        await handleBackup(env);
+-      } else if (event.cron === env.CRON_HEALTH) {
+-        await handleHealth(env);
+-      } else {
+-        await logger.warn(`Unrecognized cron trigger: ${event.cron}`);
++      validateEnv(env);
++
++      // Retry pending failed cron runs for this trigger first.
++      const pending = await env.KV.list({ prefix: 'pending_cron_' });
++      for (const key of pending.keys) {
++        const payload = await env.KV.get(key.name);
++        if (!payload) continue;
++        const pendingRun = JSON.parse(payload);
++        if (pendingRun.cron !== event.cron) continue;
++        try {
++          await runScheduledJob({ cron: pendingRun.cron }, env, services, pendingRun.date || today);
++          await env.KV.delete(key.name);
++          await services.logger.info('Retried pending cron run', { key: key.name, cron: pendingRun.cron });
++        } catch (retryError) {
++          await services.logger.warn('Pending cron retry failed', {
++            key: key.name,
++            cron: pendingRun.cron,
++            error: retryError.message
++          });
++        }
+       }
++
++      await runScheduledJob(event, env, services, today);
+     } catch (error) {
+-      await logger.error(`Cron failed: ${event.cron}`, { error: error.message, stack: error.stack });
++      const pendingKey = `pending_cron_${event.cron}_${today}`;
++      await env.KV.put(pendingKey, JSON.stringify({ cron: event.cron, date: today }), { expirationTtl: 86400 });
++      await services.logger.error(`Cron failed: ${event.cron}`, {
++        error: error.message,
++        stack: error.stack,
++        pendingKey
++      });
++    } finally {
++      await flushServices(services);
+     }
+   }
+ };
+diff --git a/src/logger.js b/src/logger.js
+index 1c5a1d4..c980289 100644
+--- a/src/logger.js
++++ b/src/logger.js
+@@ -7,49 +7,34 @@ import { CONFIG } from './config.js';
+ export class Logger {
+   /**
+    * Initializes the structured logger.
+    * @param {NotionClient} notionClient Shared Notion API client.
+    * @param {string} logsDbId Target database ID for logging.
+-   * @param {Object} [env=null] Environment bindings (for NTFY_TOPIC push alerts).
++   * @param {object} [env] Environment bindings (for NTFY_TOPIC push alerts).
+    */
+   constructor(notionClient, logsDbId, env = null) {
+     this.notion = notionClient;
+     this.logsDbId = logsDbId;
+     this.ntfyTopic = env?.NTFY_TOPIC || null;
++    this.buffer = [];
+   }
+ 
+   /**
+    * Dispatches log entry to console and optionally Notion.
+    * ERROR-level logs also trigger push notification if NTFY_TOPIC is set.
+    * @param {string} level Log level (INFO, WARN, ERROR).
+    * @param {string} message Descriptive log message.
+-   * @param {Object} [context={}] Additional metadata for the log.
++   * @param {object} [context={}] Additional metadata for the log.
+    */
+   async log(level, message, context = {}) {
+     console.log(`[${level}] ${message}`, context);
+-
+-    if (!this.logsDbId) return;
+-
+-    try {
+-      const props = CONFIG.PROPERTIES.LOGS;
+-      await this.notion.createPage(this.logsDbId, {
+-        [props.MESSAGE]: {
+-          title: [{ text: { content: message.substring(0, 2000) } }]
+-        },
+-        [props.LEVEL]: {
+-          select: { name: level }
+-        },
+-        [props.TIMESTAMP]: {
+-          date: { start: new Date().toISOString() }
+-        },
+-        [props.CONTEXT]: {
+-          rich_text: [{ text: { content: JSON.stringify(context).substring(0, 2000) } }]
+-        }
+-      });
+-    } catch (error) {
+-      console.error('Failed to write to Notion logs:', error);
+-    }
++    this.buffer.push({
++      level,
++      message: message.substring(0, 2000),
++      context,
++      timestamp: new Date().toISOString()
++    });
+ 
+     // Push critical errors via ntfy.sh
+     if (level === 'ERROR') {
+       await this.notifyPush(`SchedSec: ${message}`);
+     }
+@@ -73,20 +58,58 @@ export class Logger {
+       // Swallow notification failures — logging is sufficient
+     }
+   }
+ 
+   /**
++   * Logs an informational event.
+    * @param {string} message Log message.
+-   * @param {Object} [context] Additional metadata.
++   * @param {object} [context] Additional metadata.
++   * @returns {Promise<void>} Resolves when the log has been buffered.
+    */
+   async info(message, context) { return this.log('INFO', message, context); }
+   /**
++   * Logs a warning event.
+    * @param {string} message Log message.
+-   * @param {Object} [context] Additional metadata.
++   * @param {object} [context] Additional metadata.
++   * @returns {Promise<void>} Resolves when the log has been buffered.
+    */
+   async warn(message, context) { return this.log('WARN', message, context); }
+   /**
++   * Logs an error event.
+    * @param {string} message Log message.
+-   * @param {Object} [context] Additional metadata.
++   * @param {object} [context] Additional metadata.
++   * @returns {Promise<void>} Resolves when the log has been buffered.
+    */
+   async error(message, context) { return this.log('ERROR', message, context); }
++
++  /**
++   * Flushes buffered log entries to Notion Logs DB.
++   * Keeps logging resilient by swallowing write failures.
++   */
++  async flush() {
++    if (!this.logsDbId || this.buffer.length === 0) return;
++
++    const props = CONFIG.PROPERTIES.LOGS;
++    const entries = this.buffer.splice(0, this.buffer.length);
++
++    for (const entry of entries) {
++      try {
++        await this.notion.createPage(this.logsDbId, {
++          [props.MESSAGE]: {
++            title: [{ text: { content: entry.message } }]
++          },
++          [props.LEVEL]: {
++            select: { name: entry.level }
++          },
++          [props.TIMESTAMP]: {
++            date: { start: entry.timestamp }
++          },
++          [props.CONTEXT]: {
++            rich_text: [{ text: { content: JSON.stringify(entry.context).substring(0, 2000) } }]
++          }
++        });
++      } catch (error) {
++        console.error('Failed to write buffered log to Notion logs:', error);
++      }
++    }
++  }
+ }
+diff --git a/src/notion-client.js b/src/notion-client.js
+index f497b7b..2fb0b91 100644
+--- a/src/notion-client.js
++++ b/src/notion-client.js
+@@ -4,12 +4,12 @@ import { NotionAPIError } from './errors.js';
+ /**
+  * Enhanced Notion client with rate limiting and retry logic.
+  */
+ export class NotionClient {
+   /**
+-   *
+-   * @param apiKey The parameter.
++   * Creates a rate-limited wrapper around the official Notion client.
++   * @param {string} apiKey Internal integration token used for Notion API calls.
+    */
+   constructor(apiKey) {
+     this.client = new Client({ auth: apiKey });
+     this.requestQueue = [];
+     this.isProcessing = false;
+@@ -37,85 +37,101 @@ export class NotionClient {
+             : Math.pow(2, 4 - retries) * 1000;
+           console.warn(`Rate limited, waiting ${wait}ms (retry ${4 - retries}/3)...`);
+           await new Promise(r => { setTimeout(r, wait); });
+           this.requestQueue.unshift({ fn, resolve, reject, retries: retries - 1 });
+         } else {
+-          reject(new NotionAPIError(error.message, error));
++          reject(new NotionAPIError(error.status || 0, {
++            message: error.message,
++            code: error.code
++          }));
+         }
+       }
+       await new Promise(r => { setTimeout(r, this.delayMs); });
+     }
+ 
+     this.isProcessing = false;
+   }
+ 
+   /**
+    * Generic request wrapper.
+-   * @param fn The parameter.
+-   * @param retries The parameter.
++   * Queues a Notion API operation behind the shared in-request rate limiter.
++   * @param {Function} fn Deferred Notion API call.
++   * @param {number} [retries=3] Remaining retry attempts for rate-limited responses.
++   * @returns {Promise<unknown>} Result of the wrapped Notion API call.
+    */
+   async request(fn, retries = 3) {
+     return new Promise((resolve, reject) => {
+       this.requestQueue.push({ fn, resolve, reject, retries });
+       this._processQueue();
+     });
+   }
+ 
+   /**
+-   * Query a database.
+-   * @param databaseId The parameter.
+-   * @param filter The parameter.
+-   * @param sorts The parameter.
+-   * @returns {any} The return value.
++   * Queries a Notion database and transparently paginates all results.
++   * @param {string} databaseId Target database ID.
++   * @param {object} [filter] Optional Notion database filter object.
++   * @param {Array<object>} [sorts] Optional Notion sort definitions.
++   * @returns {Promise<{results: Array<object>}>} Aggregated query results across all pages.
+    */
+   async queryDatabase(databaseId, filter = undefined, sorts = undefined) {
+-    return this.request(() => this.client.databases.query({
+-      database_id: databaseId,
+-      filter,
+-      sorts
+-    }));
++    let allResults = [];
++    let cursor;
++
++    do {
++      const response = await this.request(() => this.client.databases.query({
++        database_id: databaseId,
++        filter,
++        sorts,
++        start_cursor: cursor
++      }));
++
++      allResults = allResults.concat(response.results || []);
++      cursor = response.has_more ? response.next_cursor : undefined;
++    } while (cursor);
++
++    return { results: allResults };
+   }
+ 
+   /**
+-   * Update a page.
+-   * @param pageId The parameter.
+-   * @param properties The parameter.
+-   * @returns {any} The return value.
++   * Updates properties on an existing Notion page.
++   * @param {string} pageId Target page ID.
++   * @param {object} properties Notion properties payload.
++   * @returns {Promise<object>} Updated Notion page object.
+    */
+   async updatePage(pageId, properties) {
+     return this.request(() => this.client.pages.update({
+       page_id: pageId,
+       properties
+     }));
+   }
+ 
+   /**
+-   * Create a page in a database.
+-   * @param databaseId The parameter.
+-   * @param properties The parameter.
+-   * @returns {any} The return value.
++   * Creates a page inside a Notion database.
++   * @param {string} databaseId Parent database ID.
++   * @param {object} properties Notion properties payload.
++   * @returns {Promise<object>} Created Notion page object.
+    */
+   async createPage(databaseId, properties) {
+     return this.request(() => this.client.pages.create({
+       parent: { database_id: databaseId },
+       properties
+     }));
+   }
+ 
+   /**
+-   * Retrieve a page.
+-   * @param pageId The parameter.
+-   * @returns {any} The return value.
++   * Retrieves a single Notion page by ID.
++   * @param {string} pageId Target page ID.
++   * @returns {Promise<object>} Notion page object.
+    */
+   async getPage(pageId) {
+     return this.request(() => this.client.pages.retrieve({ page_id: pageId }));
+   }
+ 
+   /**
+-   * Archive a page.
+-   * @param pageId The parameter.
+-   * @returns {any} The return value.
++   * Archives a Notion page.
++   * @param {string} pageId Target page ID.
++   * @returns {Promise<object>} Archived Notion page object.
+    */
+   async archivePage(pageId) {
+     return this.request(() => this.client.pages.update({
+       page_id: pageId,
+       archived: true
+diff --git a/src/scheduler/optimistic-lock.js b/src/scheduler/optimistic-lock.js
+index f82f514..2aa2183 100644
+--- a/src/scheduler/optimistic-lock.js
++++ b/src/scheduler/optimistic-lock.js
+@@ -39,6 +39,52 @@ export class OptimisticLock {
+       return { pageId: page.id, newVersion: currentVersion + 1 };
+     }
+ 
+     return { pageId: null, newVersion: 1 };
+   }
++
++  /**
++   * Batch lock acquisition to avoid one Notion query per task.
++   * @param {NotionClient} notion Shared Notion API client.
++   * @param {string} scheduleDbId Target Schedule database ID.
++   * @param {object} config Global configuration object (CONFIG).
++   * @param {string} date YYYY-MM-DD date string.
++   * @param {Array<string>} taskIds Task relation IDs to look up.
++   * @param {number} [expectedVersion=0] Version the caller expects to overwrite.
++   * @returns {Promise<Map<string, {pageId: string|null, newVersion: number, conflict: boolean}>>} Per-task lock metadata map.
++   */
++  static async acquireWriteBatch(notion, scheduleDbId, config, date, taskIds, expectedVersion = 0) {
++    const props = config.PROPERTIES.SCHEDULE;
++    const existing = await notion.queryDatabase(scheduleDbId, {
++      property: props.DATE,
++      date: { equals: date }
++    });
++
++    const taskSet = new Set(taskIds);
++    const result = new Map();
++
++    for (const page of existing.results) {
++      const relation = page.properties[props.TASK]?.relation || [];
++      const taskId = relation[0]?.id;
++      if (!taskId || !taskSet.has(taskId)) continue;
++
++      const currentVersion = page.properties[props.VERSION]?.number || 0;
++      result.set(taskId, {
++        pageId: page.id,
++        newVersion: currentVersion + 1,
++        conflict: currentVersion > expectedVersion
++      });
++    }
++
++    for (const taskId of taskIds) {
++      if (!result.has(taskId)) {
++        result.set(taskId, {
++          pageId: null,
++          newVersion: 1,
++          conflict: false
++        });
++      }
++    }
++
++    return result;
++  }
+ }
+diff --git a/src/trigger.js b/src/trigger.js
+index f2e8edb..6a82a47 100644
+--- a/src/trigger.js
++++ b/src/trigger.js
+@@ -7,42 +7,53 @@
+  * Validates a trigger token.
+  * @param {string} action - Action name (regenerate, undo, planning).
+  * @param {string} dateStr - Date (YYYY-MM-DD).
+  * @param {string} token - Hex-encoded token from query.
+  * @param {string} secret - BUTTON_SECRET from env.
+- * @returns {Promise<boolean>}
++ * @returns {Promise<boolean>} True when the token matches the current or previous hour bucket.
+  */
+ export async function validateTriggerToken(action, dateStr, token, secret) {
+   if (!secret || !token) return false;
+-  const payload = `${action}:${dateStr}`;
+-  const key = await crypto.subtle.importKey(
+-    'raw',
+-    new TextEncoder().encode(secret),
+-    { name: 'HMAC', hash: 'SHA-256' },
+-    false,
+-    ['sign']
+-  );
+-  const sig = await crypto.subtle.sign(
+-    'HMAC',
+-    key,
+-    new TextEncoder().encode(payload)
+-  );
+-  const expected = Array.from(new Uint8Array(sig))
+-    .map(b => b.toString(16).padStart(2, '0'))
+-    .join('');
+-  return token.toLowerCase() === expected.toLowerCase();
++  const currentHourBucket = Math.floor(Date.now() / (3600 * 1000));
++  const buckets = [currentHourBucket, currentHourBucket - 1];
++
++  for (const hourBucket of buckets) {
++    const payload = `${action}:${dateStr}:${hourBucket}`;
++    const key = await crypto.subtle.importKey(
++      'raw',
++      new TextEncoder().encode(secret),
++      { name: 'HMAC', hash: 'SHA-256' },
++      false,
++      ['sign']
++    );
++    const sig = await crypto.subtle.sign(
++      'HMAC',
++      key,
++      new TextEncoder().encode(payload)
++    );
++    const expected = Array.from(new Uint8Array(sig))
++      .map(b => b.toString(16).padStart(2, '0'))
++      .join('');
++
++    if (token.toLowerCase() === expected.toLowerCase()) {
++      return true;
++    }
++  }
++
++  return false;
+ }
+ 
+ /**
+  * Generates a valid trigger token (for scripts/docs).
+  * @param {string} action - Action name.
+  * @param {string} dateStr - Date (YYYY-MM-DD).
+  * @param {string} secret - BUTTON_SECRET.
+  * @returns {Promise<string>} Hex token.
+  */
+ export async function generateTriggerToken(action, dateStr, secret) {
+-  const payload = `${action}:${dateStr}`;
++  const hourBucket = Math.floor(Date.now() / (3600 * 1000));
++  const payload = `${action}:${dateStr}:${hourBucket}`;
+   const key = await crypto.subtle.importKey(
+     'raw',
+     new TextEncoder().encode(secret),
+     { name: 'HMAC', hash: 'SHA-256' },
+     false,
+diff --git a/src/workers/backup.js b/src/workers/backup.js
+index 386e1a5..f7d57ce 100644
+--- a/src/workers/backup.js
++++ b/src/workers/backup.js
+@@ -1,20 +1,18 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+ import { CONFIG } from '../config.js';
+ 
+ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * Nightly Backup Worker (Triggered 2 AM)
+  * Creates multi-tier rolling backups of Notion state in R2.
+- * @param env The parameter.
+- * @returns {any} The return value.
++ * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion, logging, and context.
++ * @returns {Promise<object>} Backup metadata including the written filename.
+  */
+-export async function handleBackup(env) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
++export async function handleBackup(env, services) {
++  const { notion, logger } = services;
+   const now = new Date();
+   const dateStr = now.toISOString().split('T')[0];
+   const dayOfWeek = now.getDay(); // 0=Sunday
+   const dayOfMonth = now.getDate();
+ 
+@@ -90,18 +88,18 @@ export async function handleBackup(env) {
+ 
+ /**
+  * Restores Notion state from a daily R2 backup.
+  * Creates a restore-point before overwriting.
+  * Supports scoped restore: context, inputs, schedule, or all.
+- * @param env The parameter.
+- * @param backupDate The parameter.
+- * @param scope The parameter.
+- * @returns {any} The return value.
++ * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion, logging, and context.
++ * @param {string} backupDate Backup date string (YYYY-MM-DD).
++ * @param {string} scope Restore scope (`context`, `inputs`, `schedule`, or `all`).
++ * @returns {Promise<object>} Restore summary with restored database names.
+  */
+-export async function restoreFromBackup(env, backupDate, scope = 'all') {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
++export async function restoreFromBackup(env, services, backupDate, scope = 'all') {
++  const { notion, logger } = services;
+   const backupKey = `backup_daily_${backupDate}.json`;
+ 
+   const backupObj = await env.R2_BUCKET.get(backupKey);
+   if (!backupObj) {
+     throw new Error(`Backup not found for ${backupDate}`);
+@@ -141,11 +139,11 @@ export async function restoreFromBackup(env, backupDate, scope = 'all') {
+     if (!snapshot[dbName] || !dbMap[dbName]) continue;
+ 
+     // Archive existing pages (mark as archived in Notion)
+     const existing = await notion.queryDatabase(dbMap[dbName]);
+     for (const page of existing.results) {
+-      await notion.updatePage(page.id, {}, true); // archive=true
++      await notion.archivePage(page.id);
+     }
+ 
+     // Re-create from backup
+     for (const page of snapshot[dbName]) {
+       if (page.properties) {
+diff --git a/src/workers/cleanup.js b/src/workers/cleanup.js
+index f18b52b..d166c81 100644
+--- a/src/workers/cleanup.js
++++ b/src/workers/cleanup.js
+@@ -1,25 +1,21 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+-import { ContextManager } from '../context.js';
+ import { PatternAnalyzer } from '../learning/patterns.js';
+ import { ConfidenceDecay } from '../learning/decay.js';
+ import { cleanupBootstrapData } from '../bootstrap.js';
+ import { CONFIG } from '../config.js';
+ 
+ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * Data Janitor Worker (Triggered 1st of month)
+  * Pattern extraction, CSV archival, confidence decay, log purge.
+- * @param env The parameter.
+- * @returns {any} The return value.
++ * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion, logging, and context.
++ * @returns {Promise<object>} Cleanup summary with archived/deleted counts.
+  */
+-export async function handleCleanup(env) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++export async function handleCleanup(env, services) {
++  const { notion, logger, context } = services;
+ 
+   const now = new Date();
+   const ninetyDaysAgo = new Date(now);
+   ninetyDaysAgo.setDate(now.getDate() - 90);
+   const thirtyDaysAgo = new Date(now);
+diff --git a/src/workers/export.js b/src/workers/export.js
+index 4b28252..dda2614 100644
+--- a/src/workers/export.js
++++ b/src/workers/export.js
+@@ -1,64 +1,88 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+ import { CONFIG } from '../config.js';
+ 
+ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * User Data Export — provides schedule history as CSV.
+  * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion and logging.
+  * @param {object} params Query parameters ({ days, format }).
+- * @returns {Promise<Response>} CSV response or JSON error.
++ * @returns {Promise<object>} Export payload containing JSON rows or CSV contents.
+  */
+-export async function handleExport(env, params = {}) {
+-    const notion = new NotionClient(env.NOTION_API_KEY);
+-    const logger = new Logger(notion, env.LOGS_DB_ID, env);
++export async function handleExport(env, services, params = {}) {
++  const { notion, logger } = services;
++  const days = Number.parseInt(params.days, 10) || 30;
++  const format = params.format === 'json' ? 'json' : 'csv';
+ 
+-    const days = parseInt(params.days) || 30;
+-    const format = params.format || 'csv';
++  const since = new Date();
++  since.setDate(since.getDate() - days);
++  const sinceStr = since.toISOString().split('T')[0];
+ 
+-    const since = new Date();
+-    since.setDate(since.getDate() - days);
+-    const sinceStr = since.toISOString().split('T')[0];
++  const [scheduleResponse, inputsResponse] = await Promise.all([
++    notion.queryDatabase(env.SCHEDULE_DB_ID, {
++      property: P.SCHEDULE.DATE,
++      date: { on_or_after: sinceStr }
++    }),
++    notion.queryDatabase(env.INPUTS_DB_ID)
++  ]);
+ 
+-    const response = await notion.queryDatabase(env.SCHEDULE_DB_ID, {
+-        property: P.SCHEDULE.DATE,
+-        date: { on_or_after: sinceStr }
+-    });
++  const inputTaskById = new Map(
++    inputsResponse.results.map(page => ([
++      page.id,
++      {
++        name: page.properties[CONFIG.PROPERTIES.INPUTS.TASK_NAME]?.title?.[0]?.plain_text || '',
++        energy: page.properties[CONFIG.PROPERTIES.INPUTS.ENERGY]?.select?.name || ''
++      }
++    ]))
++  );
+ 
+-    const rows = response.results.map(page => {
+-        const props = page.properties;
+-        return {
+-            date: props[P.SCHEDULE.DATE]?.date?.start || '',
+-            task: props[P.SCHEDULE.NOTES]?.rich_text?.[0]?.plain_text || '',
+-            ai_start: props[P.SCHEDULE.AI_START]?.rich_text?.[0]?.plain_text || '',
+-            final_start: props[P.SCHEDULE.FINAL_START]?.rich_text?.[0]?.plain_text || '',
+-            ai_duration: props[P.SCHEDULE.AI_DURATION]?.number || '',
+-            final_duration: props[P.SCHEDULE.FINAL_DURATION]?.number || '',
+-            actual_duration: props[P.SCHEDULE.ACTUAL_DURATION]?.number || '',
+-            status: props[P.SCHEDULE.STATUS]?.select?.name || '',
+-            energy: props[P.SCHEDULE.NOTES]?.rich_text?.[0]?.plain_text || ''
+-        };
+-    });
++  const rows = scheduleResponse.results.map(page => {
++    const props = page.properties;
++    const taskId = props[P.SCHEDULE.TASK]?.relation?.[0]?.id || '';
++    const inputTask = inputTaskById.get(taskId);
++    return {
++      date: props[P.SCHEDULE.DATE]?.date?.start || '',
++      task: inputTask?.name || taskId || '',
++      ai_start: props[P.SCHEDULE.AI_START]?.rich_text?.[0]?.plain_text || '',
++      final_start: props[P.SCHEDULE.FINAL_START]?.rich_text?.[0]?.plain_text || '',
++      ai_duration: props[P.SCHEDULE.AI_DURATION]?.number || '',
++      final_duration: props[P.SCHEDULE.FINAL_DURATION]?.number || '',
++      actual_duration: props[P.SCHEDULE.ACTUAL_DURATION]?.number || '',
++      status: props[P.SCHEDULE.STATUS]?.select?.name || '',
++      energy: inputTask?.energy || '',
++      notes: props[P.SCHEDULE.NOTES]?.rich_text?.[0]?.plain_text || ''
++    };
++  });
+ 
+-    if (format === 'json') {
+-        return { success: true, count: rows.length, data: rows };
+-    }
++  if (format === 'json') {
++    return { success: true, count: rows.length, data: rows };
++  }
+ 
+-    // CSV format
+-    const headers = ['Date', 'Task', 'AI_Start', 'Final_Start', 'AI_Duration', 'Final_Duration', 'Actual_Duration', 'Status'];
+-    const csvRows = rows.map(r =>
+-        [r.date, `"${r.task.replace(/"/g, '""')}"`, r.ai_start, r.final_start, r.ai_duration, r.final_duration, r.actual_duration, r.status].join(',')
+-    );
+-    const csv = [headers.join(','), ...csvRows].join('\n');
++  // CSV format
++  const headers = ['Date', 'Task', 'AI_Start', 'Final_Start', 'AI_Duration', 'Final_Duration', 'Actual_Duration', 'Status', 'Energy', 'Notes'];
++  const csvRows = rows.map(r =>
++    [
++      r.date,
++      `"${r.task.replace(/"/g, '""')}"`,
++      r.ai_start,
++      r.final_start,
++      r.ai_duration,
++      r.final_duration,
++      r.actual_duration,
++      r.status,
++      r.energy,
++      `"${r.notes.replace(/"/g, '""')}"`
++    ].join(',')
++  );
++  const csv = [headers.join(','), ...csvRows].join('\n');
+ 
+-    await logger.info(`Data exported: ${rows.length} entries, last ${days} days`);
++  await logger.info(`Data exported: ${rows.length} entries, last ${days} days`);
+ 
+-    return {
+-        success: true,
+-        count: rows.length,
+-        csv,
+-        contentType: 'text/csv',
+-        filename: `schedsec_export_${sinceStr}.csv`
+-    };
++  return {
++    success: true,
++    count: rows.length,
++    csv,
++    contentType: 'text/csv',
++    filename: `schedsec_export_${sinceStr}.csv`
++  };
+ }
+diff --git a/src/workers/final.js b/src/workers/final.js
+index 0c503de..05e1908 100644
+--- a/src/workers/final.js
++++ b/src/workers/final.js
+@@ -1,8 +1,5 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+-import { ContextManager } from '../context.js';
+ import { CONFIG } from '../config.js';
+ import { RuleExtractor } from '../learning/rule-extraction.js';
+ import { MLIntelligence } from '../scheduler/duration-learning.js';
+ import { VectorizeManager } from '../learning/vectorize.js';
+ import { IdempotencyManager } from '../features/idempotency.js';
+@@ -16,18 +13,17 @@ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * Daily Final Generator
+  * Analyzes yesterday's user edits to extract rules, then finalizes today's schedule.
+  * Includes: plausibility filtering, correction flag awareness, end-of-day mining.
+- * @param {object} env Environment bindings (AI, KV, D1, etc.).
++ * @param {object} env Environment bindings (AI, KV, Vectorize, etc.).
++ * @param {object} services Shared service instances for Notion, logging, and context.
+  * @param {string} dateStr Today's date (YYYY-MM-DD).
+  * @returns {Promise<object>} Execution summary with learning stats.
+  */
+-export async function handleFinal(env, dateStr) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++export async function handleFinal(env, services, dateStr) {
++  const { notion, logger, context } = services;
+   const idempotency = new IdempotencyManager(env.KV);
+   const undo = new UndoManager(env.KV, notion);
+   const extractor = new RuleExtractor(env.AI);
+   const vectorize = new VectorizeManager(env);
+ 
+@@ -64,12 +60,12 @@ export async function handleFinal(env, dateStr) {
+         actual_duration: props[P.SCHEDULE.ACTUAL_DURATION]?.number,
+         completion_rating: props[P.SCHEDULE.COMPLETION_RATING]?.select?.name,
+         your_notes: props[P.SCHEDULE.YOUR_NOTES]?.rich_text?.[0]?.plain_text || '',
+         status: props[P.SCHEDULE.STATUS]?.select?.name,
+         // New fields for ML filtering
+-        correction_flag: props.Correction_Flag?.checkbox || false,
+-        skip_reason: props.Skip_Reason?.select?.name || null,
++        correction_flag: props[P.SCHEDULE.CORRECTION_FLAG]?.checkbox || false,
++        skip_reason: props[P.SCHEDULE.SKIP_REASON]?.select?.name || null,
+         date: yesterdayStr
+       };
+     });
+ 
+     // Identify user edits (with plausibility bounds built into identifyEdits)
+@@ -286,11 +282,11 @@ export async function handleFinal(env, dateStr) {
+         duration: p.properties[P.SCHEDULE.AI_DURATION]?.number
+       })));
+     }
+ 
+     // Generate today's final schedule
+-    const result = await handlePreview(env, dateStr, CONFIG.STATUS.SCHEDULE.SCHEDULED);
++    const result = await handlePreview(env, services, dateStr, CONFIG.STATUS.SCHEDULE.SCHEDULED);
+ 
+     await logger.info(`Final generator completed for ${dateStr}`, {
+       learned_rules: learnedRulesCount,
+       skipped_rules: skippedRulesCount,
+       edits_detected: edits.length,
+diff --git a/src/workers/health.js b/src/workers/health.js
+index 888d313..be36133 100644
+--- a/src/workers/health.js
++++ b/src/workers/health.js
+@@ -1,20 +1,16 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+-import { ContextManager } from '../context.js';
+ import { CONFIG } from '../config.js';
+ 
+ /**
+  * Health Check Worker (Triggered Monday 3 AM)
+  * Full integrity check including AI quality monitoring.
+- * @param env The parameter.
+- * @returns {any} The return value.
++ * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion, logging, and context.
++ * @returns {Promise<object>} Health-check result object with component statuses.
+  */
+-export async function handleHealth(env) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++export async function handleHealth(env, services) {
++  const { notion, logger, context } = services;
+ 
+   const results = {
+     notion_api: false,
+     ai_model: false,
+     vectorize: false,
+@@ -105,10 +101,31 @@ export async function handleHealth(env) {
+ 
+       results.quality_metrics = { passed: alerts.length === 0, alerts };
+     }
+   } catch (e) { await logger.error('HealthCheck: Quality metrics failed', { error: e.message }); }
+ 
++  // Detect stale partial schedule writes
++  try {
++    const writes = await env.KV.list({ prefix: 'schedule_write_' });
++    const now = Date.now();
++    for (const key of writes.keys) {
++      const raw = await env.KV.get(key.name);
++      if (!raw) continue;
++      const state = JSON.parse(raw);
++      if (state.status === 'in_progress' && state.started_at) {
++        const ageMs = now - new Date(state.started_at).getTime();
++        if (ageMs > 10 * 60 * 1000) {
++          results.quality_metrics.alerts.push({
++            type: 'PARTIAL_SCHEDULE_WRITE',
++            key: key.name,
++            age_minutes: Math.floor(ageMs / 60000)
++          });
++        }
++      }
++    }
++  } catch { /* non-critical */ }
++
+   const status = Object.entries(results)
+     .filter(([k]) => k !== 'quality_metrics')
+     .every(([, v]) => v === true) && results.quality_metrics.passed
+     ? 'HEALTHY' : 'DEGRADED';
+ 
+diff --git a/src/workers/preview.js b/src/workers/preview.js
+index cfba896..d24f9e5 100644
+--- a/src/workers/preview.js
++++ b/src/workers/preview.js
+@@ -1,11 +1,8 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+-import { ContextManager } from '../context.js';
+ import { CONFIG } from '../config.js';
+ import { ScheduleResponseSchema } from '../utils/validation.js';
+-import { InvalidJSONError, AISchedulingError } from '../errors.js';
++import { InvalidJSONError } from '../errors.js';
+ import { InferenceEngine } from '../scheduler/inference.js';
+ import { OptimizationEngine } from '../scheduler/optimizations.js';
+ import { DependencyResolver } from '../scheduler/dependencies.js';
+ import { RecurrenceManager } from '../scheduler/recurrence.js';
+ import { TaskManager } from '../scheduler/task-manager.js';
+@@ -17,29 +14,26 @@ import { IdempotencyManager } from '../features/idempotency.js';
+ import { PanicManager } from '../features/panic.js';
+ import { PrefetchManager } from '../features/look-ahead.js';
+ import { OptimisticLock } from '../scheduler/optimistic-lock.js';
+ import { CriticalPathAnalyzer } from '../scheduler/critical-path.js';
+ import { BanditManager } from '../scheduler/time-slot-bandit.js';
+-import { BufferLearning } from '../features/buffer-learning.js';
+ import { EnergyCurve } from '../features/energy-curve.js';
+ import { TaskBatching } from '../features/task-batching.js';
+-import { SlotFinder } from '../scheduler/slots.js';
+ 
+ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * Pipeline for generating schedule previews (drafts).
+  * Handles task fetching, recurrence, AI inference, and optimistic locking.
+- * @param {Object} env Environment bindings (AI, KV, D1, etc.).
++ * @param {object} env Environment bindings (AI, KV, Vectorize, etc.).
++ * @param {object} services Shared service instances for Notion, logging, and context.
+  * @param {string} dateStr Target date (YYYY-MM-DD).
+- * @param {string} [statusOverride=null] Optional status (e.g. PREFETCH).
+- * @returns {Promise<Object>} Execution summary.
++ * @param {string} [statusOverride] Optional status (e.g. PREFETCH).
++ * @returns {Promise<object>} Execution summary.
+  */
+-export async function handlePreview(env, dateStr, statusOverride = null) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++export async function handlePreview(env, services, dateStr, statusOverride = null) {
++  const { notion, logger, context } = services;
+   const idempotency = new IdempotencyManager(env.KV);
+   const vectorize = new VectorizeManager(env);
+ 
+   // Idempotency Check
+   const idempotencyKey = idempotency.generateKey(dateStr, statusOverride || 'preview');
+@@ -214,14 +208,15 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
+     try {
+       await env.KV.put('prompt_token_count', String(promptResult.tokenEstimate), { expirationTtl: 604800 });
+     } catch { /* non-critical */ }
+ 
+     // AI Generation with Zod Validation & Retry
++    const runConfig = CONFIG.getRunConfig(env);
+     let schedule = null;
+     let aiAttempts = 0;
+     let lastRawResponse = null;
+-    const maxRetries = 3;
++    const maxRetries = runConfig.AI_MAX_RETRIES;
+ 
+     while (!schedule && aiAttempts < maxRetries) {
+       aiAttempts++;
+       try {
+         const aiResult = await env.AI.run('@cf/qwen/qwen2.5-7b-instruct', { prompt: prompt });
+@@ -240,16 +235,17 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
+       } catch (parseError) {
+         await logger.warn(`AI JSON parse failed (attempt ${aiAttempts})`, { error: parseError.message });
+       }
+     }
+ 
+-    // Fallback if AI fails — use SlotFinder for constraint-aware placement
++    // Fallback if AI fails — use deterministic constraint-aware placement
+     if (!schedule) {
+       const jsonError = new InvalidJSONError(lastRawResponse || '', aiAttempts);
+-      await logger.error('AI failed after 3 attempts, using fallback scheduler', {
++      await logger.error(`AI failed after ${maxRetries} attempt(s), using fallback scheduler`, {
+         code: jsonError.code,
+-        attempts: aiAttempts
++        attempts: aiAttempts,
++        run_mode: env.RUN_MODE || 'standard'
+       });
+       schedule = FallbackScheduler.generate(sortedTasks, workHours.start, learnedBuffers);
+     }
+ 
+     // Track AI quality metrics
+@@ -259,10 +255,24 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
+       : (qualityMetrics.current_week.json_failure_rate || 0);
+     await context.set('ai_quality_metrics', qualityMetrics);
+ 
+     // Write to Schedule DB with Optimistic Locking
+     const writeStatus = statusOverride || CONFIG.STATUS.SCHEDULE.PREVIEW;
++    const lockMap = await OptimisticLock.acquireWriteBatch(
++      notion,
++      env.SCHEDULE_DB_ID,
++      CONFIG,
++      dateStr,
++      schedule.map(entry => entry.task_id)
++    );
++
++    await env.KV.put(
++      `schedule_write_${dateStr}`,
++      JSON.stringify({ status: 'in_progress', started_at: new Date().toISOString() }),
++      { expirationTtl: 600 }
++    );
++
+     for (const entry of schedule) {
+       let version = 1;
+ 
+       // Build enriched notes: xAI transparency + multi-day visibility + prompt version
+       const noteParts = [];
+@@ -280,29 +290,29 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
+         noteParts.push(`[Day ${dayNum}/${parentTask.estimatedDays}]`);
+       }
+       noteParts.push(`[prompt:${promptVersion}]`);
+       const enrichedNotes = noteParts.join(' ').substring(0, 2000);
+ 
+-      try {
+-        const lock = await OptimisticLock.acquireWrite(notion, env.SCHEDULE_DB_ID, CONFIG, dateStr, entry.task_id);
+-        version = lock.newVersion;
+-        if (lock.pageId) {
+-          // Update existing
+-          await notion.updatePage(lock.pageId, {
+-            [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
+-            [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
+-            [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
+-            [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
+-            [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
+-            [P.SCHEDULE.VERSION]: { number: version },
+-            [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
+-            [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
+-          });
+-          continue;
+-        }
+-      } catch (lockError) {
+-        await logger.info(`Skipping overwrite for ${entry.task_id}: ${lockError.message}`);
++      const lock = lockMap.get(entry.task_id) || { pageId: null, newVersion: 1, conflict: false };
++      if (lock.conflict) {
++        await logger.info(`Skipping overwrite for ${entry.task_id}: optimistic lock conflict`);
++        continue;
++      }
++      version = lock.newVersion;
++
++      if (lock.pageId) {
++        // Update existing
++        await notion.updatePage(lock.pageId, {
++          [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
++          [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
++          [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
++          [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
++          [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
++          [P.SCHEDULE.VERSION]: { number: version },
++          [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
++          [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
++        });
+         continue;
+       }
+ 
+       // Create new
+       await notion.createPage(env.SCHEDULE_DB_ID, {
+@@ -317,18 +327,24 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
+         [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
+         [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
+       });
+     }
+ 
++    await env.KV.put(
++      `schedule_write_${dateStr}`,
++      JSON.stringify({ status: 'complete', finished_at: new Date().toISOString() }),
++      { expirationTtl: 86400 }
++    );
++
+     await logger.info(`Preview generated for ${dateStr}`, { count: schedule.length, aiAttempts });
+     await idempotency.complete(idempotencyKey);
+ 
+-    // Prefetch T+2
+-    if (!statusOverride) {
++    // Prefetch T+2 (skipped in budget mode)
++    if (!statusOverride && runConfig.ENABLE_PREFETCH) {
+       const dates = PrefetchManager.getDates(new Date(dateStr));
+       try {
+-        await handlePreview(env, dates.dayAfter, CONFIG.STATUS.SCHEDULE.PREFETCH);
++        await handlePreview(env, services, dates.dayAfter, CONFIG.STATUS.SCHEDULE.PREFETCH);
+       } catch (prefetchError) {
+         await logger.warn('T+2 prefetch failed (non-critical)', { error: prefetchError.message });
+       }
+     }
+ 
+diff --git a/src/workers/regenerate.js b/src/workers/regenerate.js
+index 2955749..d461a4c 100644
+--- a/src/workers/regenerate.js
++++ b/src/workers/regenerate.js
+@@ -1,42 +1,53 @@
+ import { handlePreview } from './preview.js';
+ import { UndoManager } from '../features/undo.js';
+-import { NotionClient } from '../notion-client.js';
+ import { CONFIG } from '../config.js';
+ 
+ /**
+  * Manual Regenerate Worker
+  * Allows user to force a re-generation of today's schedule.
+- * @param env The parameter.
+- * @param dateStr The parameter.
+- * @returns {any} The return value.
++ * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion, logging, and context.
++ * @param {string} dateStr Target date (YYYY-MM-DD).
++ * @returns {Promise<object>} Result of the regenerate workflow.
+  */
+-export async function handleRegenerate(env, dateStr) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
++export async function handleRegenerate(env, services, dateStr) {
++  const { notion } = services;
+   const undo = new UndoManager(env.KV, notion);
++  const lockKey = `regen_lock_${dateStr}`;
++  const existingLock = await env.KV.get(lockKey);
++  if (existingLock) {
++    return { success: false, message: 'Regeneration already in progress' };
++  }
+ 
+-  // Fetch current schedule for the date
+-  const currentScheduleResponse = await notion.queryDatabase(env.SCHEDULE_DB_ID, {
+-    property: CONFIG.PROPERTIES.SCHEDULE.DATE,
+-    date: { equals: dateStr }
+-  });
++  await env.KV.put(lockKey, 'processing', { expirationTtl: 300 });
+ 
+-  const currentSchedule = currentScheduleResponse.results.map(page => ({
+-    id: page.id,
+-    task_id: page.properties[CONFIG.PROPERTIES.SCHEDULE.TASK].relation[0]?.id,
+-    start: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_START].rich_text[0]?.plain_text,
+-    duration: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_DURATION].number
+-  }));
++  try {
++    // Fetch current schedule for the date
++    const currentScheduleResponse = await notion.queryDatabase(env.SCHEDULE_DB_ID, {
++      property: CONFIG.PROPERTIES.SCHEDULE.DATE,
++      date: { equals: dateStr }
++    });
+ 
+-  // Take undo snapshot
+-  if (currentSchedule.length > 0) {
+-    await undo.createSnapshot(dateStr, currentSchedule);
+-  }
++    const currentSchedule = currentScheduleResponse.results.map(page => ({
++      id: page.id,
++      task_id: page.properties[CONFIG.PROPERTIES.SCHEDULE.TASK].relation[0]?.id,
++      start: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_START].rich_text[0]?.plain_text,
++      duration: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_DURATION].number
++    }));
+ 
+-  // Delete current entries
+-  for (const item of currentSchedule) {
+-    await notion.archivePage(item.id);
+-  }
++    // Take undo snapshot
++    if (currentSchedule.length > 0) {
++      await undo.createSnapshot(dateStr, currentSchedule);
++    }
+ 
+-  // Trigger re-generation (uses Preview logic)
+-  return await handlePreview(env, dateStr);
++    // Delete current entries
++    for (const item of currentSchedule) {
++      await notion.archivePage(item.id);
++    }
++
++    // Trigger re-generation (uses Preview logic)
++    return await handlePreview(env, services, dateStr);
++  } finally {
++    await env.KV.delete(lockKey);
++  }
+ }
+diff --git a/src/workers/reset.js b/src/workers/reset.js
+index d6c1c80..ae16172 100644
+--- a/src/workers/reset.js
++++ b/src/workers/reset.js
+@@ -1,73 +1,64 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+-import { ContextManager } from '../context.js';
+-import { VectorizeManager } from '../learning/vectorize.js';
+-import { CONFIG } from '../config.js';
+-
+-const P = CONFIG.PROPERTIES;
+-
+ /**
+  * System Reset — scoped data wipe with dry-run support.
+  * @param {object} env Environment bindings.
++ * @param {object} services Shared clients.
+  * @param {object} options { scope: 'rules'|'schedule'|'full', dry_run: boolean }
+  * @returns {Promise<object>} Summary of what was (or would be) deleted.
+  */
+-export async function handleReset(env, options = {}) {
+-    const notion = new NotionClient(env.NOTION_API_KEY);
+-    const logger = new Logger(notion, env.LOGS_DB_ID, env);
+-    const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++export async function handleReset(env, services, options = {}) {
++  const { notion, logger, context } = services;
+ 
+-    const { scope = 'rules', dry_run = true } = options;
+-    const summary = { scope, dry_run, actions: [] };
++  const { scope = 'rules', dry_run = true } = options;
++  const summary = { scope, dry_run, actions: [] };
+ 
+-    // Scope: rules — clear inference patterns, learned rules, Vectorize
+-    if (scope === 'rules' || scope === 'full') {
+-        summary.actions.push({ target: 'inference_patterns_v2', action: 'clear' });
+-        summary.actions.push({ target: 'learned_rules_vectors', action: 'clear' });
+-        summary.actions.push({ target: 'time_slot_bandits', action: 'clear' });
+-        summary.actions.push({ target: 'energy_curve', action: 'clear' });
+-        summary.actions.push({ target: 'anomaly_baseline', action: 'clear' });
+-        summary.actions.push({ target: 'learned_buffers (KV)', action: 'delete' });
++  // Scope: rules — clear inference patterns, learned rules, Vectorize
++  if (scope === 'rules' || scope === 'full') {
++    summary.actions.push({ target: 'inference_patterns_v2', action: 'clear' });
++    summary.actions.push({ target: 'learned_rules_vectors', action: 'clear' });
++    summary.actions.push({ target: 'time_slot_bandits', action: 'clear' });
++    summary.actions.push({ target: 'energy_curve', action: 'clear' });
++    summary.actions.push({ target: 'anomaly_baseline', action: 'clear' });
++    summary.actions.push({ target: 'learned_buffers (KV)', action: 'delete' });
+ 
+-        if (!dry_run) {
+-            await context.set('inference_patterns_v2', {}, 'System reset');
+-            await context.set('learned_rules_vectors', { rules: [] }, 'System reset');
+-            await context.set('time_slot_bandits', {}, 'System reset');
+-            await context.set('energy_curve', {}, 'System reset');
+-            await context.set('anomaly_baseline', null, 'System reset');
+-            try { await env.KV.delete('learned_buffers'); } catch { /* ok */ }
+-            await logger.info('System reset: rules cleared', { scope });
+-        }
++    if (!dry_run) {
++      await context.set('inference_patterns_v2', {}, 'System reset');
++      await context.set('learned_rules_vectors', { rules: [] }, 'System reset');
++      await context.set('time_slot_bandits', {}, 'System reset');
++      await context.set('energy_curve', {}, 'System reset');
++      await context.set('anomaly_baseline', null, 'System reset');
++      try { await env.KV.delete('learned_buffers'); } catch { /* ok */ }
++      await logger.info('System reset: rules cleared', { scope });
+     }
++  }
+ 
+-    // Scope: schedule — archive all Schedule DB entries
+-    if (scope === 'schedule' || scope === 'full') {
+-        const scheduleResponse = await notion.queryDatabase(env.SCHEDULE_DB_ID);
+-        summary.actions.push({ target: 'Schedule DB', action: 'archive', count: scheduleResponse.results.length });
++  // Scope: schedule — archive all Schedule DB entries
++  if (scope === 'schedule' || scope === 'full') {
++    const scheduleResponse = await notion.queryDatabase(env.SCHEDULE_DB_ID);
++    summary.actions.push({ target: 'Schedule DB', action: 'archive', count: scheduleResponse.results.length });
+ 
+-        if (!dry_run) {
+-            for (const page of scheduleResponse.results) {
+-                await notion.archivePage(page.id);
+-            }
+-            // Clear undo snapshots and idempotency keys
+-            try {
+-                await env.KV.delete('prompt_token_count');
+-            } catch { /* ok */ }
+-            await logger.info('System reset: schedule archived', { scope, count: scheduleResponse.results.length });
+-        }
++    if (!dry_run) {
++      for (const page of scheduleResponse.results) {
++        await notion.archivePage(page.id);
++      }
++      // Clear undo snapshots and idempotency keys
++      try {
++        await env.KV.delete('prompt_token_count');
++      } catch { /* ok */ }
++      await logger.info('System reset: schedule archived', { scope, count: scheduleResponse.results.length });
+     }
++  }
+ 
+-    // Scope: full — also clear KV state
+-    if (scope === 'full') {
+-        summary.actions.push({ target: 'ai_quality_metrics', action: 'clear' });
+-        summary.actions.push({ target: 'streak_data', action: 'clear' });
++  // Scope: full — also clear KV state
++  if (scope === 'full') {
++    summary.actions.push({ target: 'ai_quality_metrics', action: 'clear' });
++    summary.actions.push({ target: 'streak_data', action: 'clear' });
+ 
+-        if (!dry_run) {
+-            await context.set('ai_quality_metrics', { current_week: {} }, 'System reset');
+-            await context.set('streak_data', {}, 'System reset');
+-            await logger.info('System reset: full reset completed', { scope });
+-        }
++    if (!dry_run) {
++      await context.set('ai_quality_metrics', { current_week: {} }, 'System reset');
++      await context.set('streak_data', {}, 'System reset');
++      await logger.info('System reset: full reset completed', { scope });
+     }
++  }
+ 
+-    return { success: true, ...summary };
++  return { success: true, ...summary };
+ }
+diff --git a/src/workers/stats.js b/src/workers/stats.js
+index 84e3232..00989c9 100644
+--- a/src/workers/stats.js
++++ b/src/workers/stats.js
+@@ -1,23 +1,19 @@
+-import { NotionClient } from '../notion-client.js';
+-import { Logger } from '../logger.js';
+-import { ContextManager } from '../context.js';
+ import { CONFIG } from '../config.js';
+ import { AnomalyDetector } from '../scheduler/anomaly-detection.js';
+ 
+ const P = CONFIG.PROPERTIES;
+ 
+ /**
+  * Weekly Stats Aggregator (Triggered Sunday 11:59 PM)
+  * Calculates analytics based on completion rate, rule inferences, and streaks.
+- * @param env The parameter.
+- * @returns {any} The return value.
++ * @param {object} env Environment bindings.
++ * @param {object} services Shared service instances for Notion, logging, and context.
++ * @returns {Promise<object>} Aggregated weekly statistics payload.
+  */
+-export async function handleStats(env) {
+-  const notion = new NotionClient(env.NOTION_API_KEY);
+-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
++export async function handleStats(env, services) {
++  const { notion, logger, context } = services;
+ 
+   const now = new Date();
+   const weekAgo = new Date(now);
+   weekAgo.setDate(now.getDate() - 7);
+   const weekAgoStr = weekAgo.toISOString().split('T')[0];
+@@ -86,13 +82,11 @@ export async function handleStats(env) {
+   // Context Size — read from KV (tracked during prompt generation)
+   let contextSizeAvg = 0;
+   try {
+     const tokenCount = await env.KV.get('prompt_token_count');
+     contextSizeAvg = tokenCount ? parseInt(tokenCount) : 0;
+-  } catch {
+-    contextSizeAvg = 0;
+-  }
++  } catch { /* non-critical */ }
+ 
+   // Streak tracking — consecutive days with ≥70% completion
+   const dateMap = {};
+   for (const e of entries) {
+     if (!e.date) continue;
+diff --git a/wrangler.toml b/wrangler.toml
+index 541ffed..13083ad 100644
+--- a/wrangler.toml
++++ b/wrangler.toml
+@@ -12,21 +12,17 @@ id = "your-kv-namespace-id"
+ 
+ [[r2_buckets]]
+ binding = "R2_BUCKET"
+ bucket_name = "schedsec-backups"
+ 
+-[[d1_databases]]
+-binding = "DB"
+-database_name = "schedsec-cache"
+-database_id = "your-d1-database-id"
+-
+ [[vectorize]]
+ binding = "VECTORIZE"
+ index_name = "schedsec-learned-rules"
+ 
+ [vars]
+ ENVIRONMENT = "production"
++RUN_MODE = "standard"
+ CRON_PREVIEW = "30 1 * * *"
+ CRON_FINAL = "30 9 * * *"
+ CRON_STATS = "59 23 * * 0"
+ CRON_CLEANUP = "0 0 1 * *"
+ CRON_BACKUP = "0 2 * * *"

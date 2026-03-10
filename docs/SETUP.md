@@ -3,7 +3,7 @@
 This guide details the steps to deploy SchedSec as a personal, self-hosted scheduling assistant.
 
 ## Prerequisites
-* **Cloudflare Account**: [Sign up here](https://dash.cloudflare.com/sign-up). You will need access to Workers, KV, D1, R2, and Vectorize.
+* **Cloudflare Account**: [Sign up here](https://dash.cloudflare.com/sign-up). You will need access to Workers, KV, R2, and Vectorize.
 * **Notion Account**: [Sign up here](https://www.notion.so/signup).
 * **Node.js**: >= 18.0.0.
 * **Wrangler CLI**: Follow the [official installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/).
@@ -18,7 +18,7 @@ Instead of building databases manually, use the official SchedSec Dashboard temp
 2. Click **Duplicate** in the top-right corner to copy it to your workspace.
 
 ### B. Automated Infrastructure Setup
-Clone the repository and run the setup script to provision Cloudflare resources (KV, D1, R2, Vectorize) automatically using the CLI:
+Clone the repository and run the setup script to provision Cloudflare resources (KV, R2, Vectorize) automatically using the CLI:
 ```bash
 cd schedsec
 npm install
@@ -26,7 +26,7 @@ npx wrangler login
 npm run setup
 ```
 > [!IMPORTANT]
-> **Manual Verification**: The setup script attempts to inject resource IDs into `wrangler.toml`. Please verify that the `id` and `database_id` fields in your `wrangler.toml` match the resources shown in your [Cloudflare Dashboard](https://dash.cloudflare.com).
+> **Manual Verification**: The setup script attempts to inject resource IDs into `wrangler.toml`. Please verify that the KV namespace `id` matches the resource shown in your [Cloudflare Dashboard](https://dash.cloudflare.com).
 
 ---
 
@@ -74,25 +74,75 @@ npm run deploy
 
 ---
 
-## 4. Finalizing the Dashboard (Buttons & Views)
+## 4. Notion UI Setup (Form + Templates + Schedule Views + Buttons)
 
-### A. Dashboard Layout
-The main **SchedSec Dashboard** page should be your primary cockpit. We recommend placing the trigger buttons at the top of this page.
+### A. Capture Form (Inputs DB)
+Use a real Notion **Form** as your primary input surface (instead of a table with hidden columns):
+1. Open the **Inputs** database.
+2. Click **+ Add a view** → **Form** (or type `/form`).
+3. Add these questions:
 
-1. **Generate Trigger URLs**: Run this script after your first deployment to get your specific secure links:
+| # | Field | Required | Description |
+|---|---|---|---|
+| 1 | `Task` | Yes | What do you need to do? |
+| 2 | `Deadline` | No | When is this due? |
+| 3 | `Duration` | No | Estimated minutes (leave blank to let scheduler infer). |
+| 4 | `Priority` | No | High / Medium / Low (defaults to Medium). |
+| 5 | `Task_Type` | No | TASK, FIXED_APPOINTMENT, or TIME_BLOCK. |
+| 6 | `Energy` | No | Deep / Moderate / Light (defaults to Moderate). |
+| 7 | `Time_Preference` | No | Morning / Midday / Afternoon / Evening / Anytime. |
+| 8 | `Fixed_Time` | No | Only for appointments; leave blank for regular tasks. |
+| 9 | `Recurrence` | No | Daily, Weekday, or specific day. |
+| 10 | `Notes` | No | Any additional context. |
+
+Keep these **off** the form (system-managed): `Status`, `Background`, `Must_Complete_By`, `Depends_On`, `Learned_Rules`, `Multi_Day_State`, `Recurrence_State`, `Last_Generated`, `Estimated_Days`, `Weekly_Target`, `Created`, `Updated`.
+
+### B. Database Templates (Inputs DB)
+Create these one-time templates in Notion so new tasks start with valid defaults:
+
+1. In the **Inputs** database, click the dropdown beside **New** → **+ New template**.
+2. Create template: `Quick Task` (set as default template):
+   - `Status` = `Active`
+   - `Task_Type` = `TASK`
+   - `Priority` = `Medium`
+   - `Energy` = `Moderate`
+   - `Time_Preference` = `Anytime`
+3. Create template: `Appointment`:
+   - `Status` = `Active`
+   - `Task_Type` = `FIXED_APPOINTMENT`
+4. Create template: `Time Block`:
+   - `Status` = `Active`
+   - `Task_Type` = `TIME_BLOCK`
+
+These templates align Notion defaults with SchedSec runtime defaults, while still allowing inference to fill remaining fields.
+
+### C. Schedule Views (Schedule DB)
+Create two views on the **Schedule** database:
+
+1. **Today** (table or list):
+   - Filter: `Date is today`
+   - Sort: `AI_Start` ascending
+2. **Calendar**:
+   - View type: Calendar
+   - Date property: `Date`
+   - Show at least: `Status`, `AI_Start`, `AI_Duration`
+
+### D. Dashboard Linked Schedule (Dashboard Page)
+Show today's schedule directly on the top-level dashboard:
+
+1. In **SchedSec Dashboard**, type `/linked` and select **Schedule**.
+2. Apply:
+   - Filter: `Date is today`
+   - Sort: `AI_Start` ascending
+3. Show only key properties: `Task_Link`, `AI_Start`, `AI_Duration`, `Status`.
+
+### E. Dashboard Buttons
+Place trigger buttons at the top of your **SchedSec Dashboard** page:
+1. **Generate Trigger URLs**:
    ```bash
    npm run trigger-urls https://YOUR_WORKER_URL_FROM_DEPLOYMENT
    ```
-2. **Create Buttons**:
-   - In Notion, type `/button` on the Dashboard page to create a specialized button block.
-   - **Label**: Name it (e.g., `Regenerate`, `Undo`, or `Planning Mode`).
-   - **Action**: Select **Open URL** from the "Add step" menu.
-   - **URL**: Paste the corresponding link generated by the script in Step 1.
-
-### B. Suggested Views
-Configure these views in your duplicated databases for optimal usability:
-- **Schedule DB**: Create a "Today" view filtered by `Date is today` and sorted by `AI_Start` (Asc).
-- **Inputs DB**: Create a "Task Inbox" view filtered by `Status is Active`.
+2. **Create Buttons**: In Notion, type `/button` and create buttons for `Regenerate`, `Undo`, and `Planning Mode`. Set each button's action to **Open URL** and paste the corresponding link from step 1.
 
 ---
 
@@ -103,7 +153,29 @@ Configure these views in your duplicated databases for optimal usability:
 
 ---
 
-## 6. Onboarding — Personalise Your Schedule
+## 6. Run Mode (Standard vs Budget)
+
+SchedSec supports two run modes, configured via `RUN_MODE` in `wrangler.toml`:
+
+| Setting | `standard` (default) | `budget` |
+|---|---|---|
+| AI retries per generation | 3 | 1 |
+| T+2 prefetch | Enabled | Disabled |
+| Regenerate cooldown | 30 minutes | 60 minutes |
+| Deterministic fallback | After 3 AI failures | After 1 AI failure |
+
+**When to use `budget`**: If you are on the Cloudflare Free plan or want to minimize AI/resource usage. Scheduling quality is preserved because the deterministic constraint solver (dependencies, energy budgets, fixed appointments) runs regardless of mode. The AI only handles semantic task placement.
+
+To switch, edit `wrangler.toml`:
+```toml
+[vars]
+RUN_MODE = "budget"
+```
+Then redeploy with `npm run deploy`.
+
+---
+
+## 7. Onboarding — Personalise Your Schedule
 
 After deploying and verifying, run the onboarding wizard to configure your scheduling preferences. This is what tells SchedSec *when* to run, *how* you like to work, and what your personal energy and meeting patterns look like.
 

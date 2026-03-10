@@ -8,8 +8,9 @@ const P = CONFIG.PROPERTIES;
 
 /**
  * Cold Start Seeding
- * @param env The parameter.
- * @returns {any} The return value.
+ * Seeds baseline context, example tasks, and starter Vectorize rules for a new install.
+ * @param {object} env Worker environment bindings.
+ * @returns {Promise<object>} Summary of how many records were seeded.
  */
 export async function bootstrapSystem(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
@@ -159,14 +160,17 @@ export async function bootstrapSystem(env) {
     rules: bootstrapRules.length,
     tasks: exampleTasks.length
   });
+  await context.flush();
+  await logger.flush();
 
   return { success: true, seeded: Object.keys(defaultPatterns).length + bootstrapRules.length + exampleTasks.length };
 }
 
 /**
  * Clean up bootstrap data after system matures.
- * @param env The parameter.
- * @returns {any} The return value.
+ * Removes unused bootstrap patterns and promotes heavily reinforced defaults.
+ * @param {object} env Worker environment bindings.
+ * @returns {Promise<object|undefined>} Cleanup summary, or `undefined` if no patterns exist yet.
  */
 export async function cleanupBootstrapData(env) {
   const notion = new NotionClient(env.NOTION_API_KEY);
@@ -192,5 +196,7 @@ export async function cleanupBootstrapData(env) {
   }
 
   await context.set('inference_patterns_v2', patterns);
+  await context.flush();
+  await logger.flush();
   return { removed, promoted };
 }

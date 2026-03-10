@@ -14,17 +14,13 @@ id = "your-kv-namespace-id"
 binding = "R2_BUCKET"
 bucket_name = "schedsec-backups"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "schedsec-cache"
-database_id = "your-d1-database-id"
-
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "schedsec-learned-rules"
 
 [vars]
 ENVIRONMENT = "production"
+RUN_MODE = "standard"
 CRON_PREVIEW = "30 1 * * *"
 CRON_FINAL = "30 9 * * *"
 CRON_STATS = "59 23 * * 0"

@@ -1,9 +1,6 @@
-import { NotionClient } from '../notion-client.js';
-import { Logger } from '../logger.js';
-import { ContextManager } from '../context.js';
 import { CONFIG } from '../config.js';
 import { ScheduleResponseSchema } from '../utils/validation.js';
-import { InvalidJSONError, AISchedulingError } from '../errors.js';
+import { InvalidJSONError } from '../errors.js';
 import { InferenceEngine } from '../scheduler/inference.js';
 import { OptimizationEngine } from '../scheduler/optimizations.js';
 import { DependencyResolver } from '../scheduler/dependencies.js';
@@ -19,25 +16,22 @@ import { PrefetchManager } from '../features/look-ahead.js';
 import { OptimisticLock } from '../scheduler/optimistic-lock.js';
 import { CriticalPathAnalyzer } from '../scheduler/critical-path.js';
 import { BanditManager } from '../scheduler/time-slot-bandit.js';
-import { BufferLearning } from '../features/buffer-learning.js';
 import { EnergyCurve } from '../features/energy-curve.js';
 import { TaskBatching } from '../features/task-batching.js';
-import { SlotFinder } from '../scheduler/slots.js';
 
 const P = CONFIG.PROPERTIES;
 
 /**
  * Pipeline for generating schedule previews (drafts).
  * Handles task fetching, recurrence, AI inference, and optimistic locking.
- * @param {Object} env Environment bindings (AI, KV, D1, etc.).
+ * @param {object} env Environment bindings (AI, KV, Vectorize, etc.).
+ * @param {object} services Shared service instances for Notion, logging, and context.
  * @param {string} dateStr Target date (YYYY-MM-DD).
- * @param {string} [statusOverride=null] Optional status (e.g. PREFETCH).
- * @returns {Promise<Object>} Execution summary.
+ * @param {string} [statusOverride] Optional status (e.g. PREFETCH).
+ * @returns {Promise<object>} Execution summary.
  */
-export async function handlePreview(env, dateStr, statusOverride = null) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+export async function handlePreview(env, services, dateStr, statusOverride = null) {
+  const { notion, logger, context } = services;
   const idempotency = new IdempotencyManager(env.KV);
   const vectorize = new VectorizeManager(env);
 
@@ -216,10 +210,11 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
     } catch { /* non-critical */ }
 
     // AI Generation with Zod Validation & Retry
+    const runConfig = CONFIG.getRunConfig(env);
     let schedule = null;
     let aiAttempts = 0;
     let lastRawResponse = null;
-    const maxRetries = 3;
+    const maxRetries = runConfig.AI_MAX_RETRIES;
 
     while (!schedule && aiAttempts < maxRetries) {
       aiAttempts++;
@@ -242,12 +237,13 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
       }
     }
 
-    // Fallback if AI fails — use SlotFinder for constraint-aware placement
+    // Fallback if AI fails — use deterministic constraint-aware placement
     if (!schedule) {
       const jsonError = new InvalidJSONError(lastRawResponse || '', aiAttempts);
-      await logger.error('AI failed after 3 attempts, using fallback scheduler', {
+      await logger.error(`AI failed after ${maxRetries} attempt(s), using fallback scheduler`, {
         code: jsonError.code,
-        attempts: aiAttempts
+        attempts: aiAttempts,
+        run_mode: env.RUN_MODE || 'standard'
       });
       schedule = FallbackScheduler.generate(sortedTasks, workHours.start, learnedBuffers);
     }
@@ -261,6 +257,20 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
 
     // Write to Schedule DB with Optimistic Locking
     const writeStatus = statusOverride || CONFIG.STATUS.SCHEDULE.PREVIEW;
+    const lockMap = await OptimisticLock.acquireWriteBatch(
+      notion,
+      env.SCHEDULE_DB_ID,
+      CONFIG,
+      dateStr,
+      schedule.map(entry => entry.task_id)
+    );
+
+    await env.KV.put(
+      `schedule_write_${dateStr}`,
+      JSON.stringify({ status: 'in_progress', started_at: new Date().toISOString() }),
+      { expirationTtl: 600 }
+    );
+
     for (const entry of schedule) {
       let version = 1;
 
@@ -282,25 +292,25 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
       noteParts.push(`[prompt:${promptVersion}]`);
       const enrichedNotes = noteParts.join(' ').substring(0, 2000);
 
-      try {
-        const lock = await OptimisticLock.acquireWrite(notion, env.SCHEDULE_DB_ID, CONFIG, dateStr, entry.task_id);
-        version = lock.newVersion;
-        if (lock.pageId) {
-          // Update existing
-          await notion.updatePage(lock.pageId, {
-            [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
-            [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
-            [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
-            [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
-            [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
-            [P.SCHEDULE.VERSION]: { number: version },
-            [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
-            [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
-          });
-          continue;
-        }
-      } catch (lockError) {
-        await logger.info(`Skipping overwrite for ${entry.task_id}: ${lockError.message}`);
+      const lock = lockMap.get(entry.task_id) || { pageId: null, newVersion: 1, conflict: false };
+      if (lock.conflict) {
+        await logger.info(`Skipping overwrite for ${entry.task_id}: optimistic lock conflict`);
+        continue;
+      }
+      version = lock.newVersion;
+
+      if (lock.pageId) {
+        // Update existing
+        await notion.updatePage(lock.pageId, {
+          [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
+          [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
+          [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
+          [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
+          [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
+          [P.SCHEDULE.VERSION]: { number: version },
+          [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
+          [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
+        });
         continue;
       }
 
@@ -319,14 +329,20 @@ export async function handlePreview(env, dateStr, statusOverride = null) {
       });
     }
 
+    await env.KV.put(
+      `schedule_write_${dateStr}`,
+      JSON.stringify({ status: 'complete', finished_at: new Date().toISOString() }),
+      { expirationTtl: 86400 }
+    );
+
     await logger.info(`Preview generated for ${dateStr}`, { count: schedule.length, aiAttempts });
     await idempotency.complete(idempotencyKey);
 
-    // Prefetch T+2
-    if (!statusOverride) {
+    // Prefetch T+2 (skipped in budget mode)
+    if (!statusOverride && runConfig.ENABLE_PREFETCH) {
       const dates = PrefetchManager.getDates(new Date(dateStr));
       try {
-        await handlePreview(env, dates.dayAfter, CONFIG.STATUS.SCHEDULE.PREFETCH);
+        await handlePreview(env, services, dates.dayAfter, CONFIG.STATUS.SCHEDULE.PREFETCH);
       } catch (prefetchError) {
         await logger.warn('T+2 prefetch failed (non-critical)', { error: prefetchError.message });
       }

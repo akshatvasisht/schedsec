@@ -1,6 +1,3 @@
-import { NotionClient } from '../notion-client.js';
-import { Logger } from '../logger.js';
-import { ContextManager } from '../context.js';
 import { CONFIG } from '../config.js';
 import { AnomalyDetector } from '../scheduler/anomaly-detection.js';
 
@@ -9,13 +6,12 @@ const P = CONFIG.PROPERTIES;
 /**
  * Weekly Stats Aggregator (Triggered Sunday 11:59 PM)
  * Calculates analytics based on completion rate, rule inferences, and streaks.
- * @param env The parameter.
- * @returns {any} The return value.
+ * @param {object} env Environment bindings.
+ * @param {object} services Shared service instances for Notion, logging, and context.
+ * @returns {Promise<object>} Aggregated weekly statistics payload.
  */
-export async function handleStats(env) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+export async function handleStats(env, services) {
+  const { notion, logger, context } = services;
 
   const now = new Date();
   const weekAgo = new Date(now);
@@ -88,9 +84,7 @@ export async function handleStats(env) {
   try {
     const tokenCount = await env.KV.get('prompt_token_count');
     contextSizeAvg = tokenCount ? parseInt(tokenCount) : 0;
-  } catch {
-    contextSizeAvg = 0;
-  }
+  } catch { /* non-critical */ }
 
   // Streak tracking — consecutive days with ≥70% completion
   const dateMap = {};

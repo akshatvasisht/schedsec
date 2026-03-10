@@ -2,7 +2,7 @@
 
 /**
  * SchedSec Interactive Setup Script
- * Provisions Cloudflare infrastructure (KV, D1, R2, Vectorize), injects IDs
+ * Provisions Cloudflare infrastructure (KV, R2, Vectorize), injects IDs
  * into wrangler.toml, prompts for Notion credentials, writes .dev.vars, and
  * optionally pushes secrets to production.
  */
@@ -18,7 +18,9 @@ const DEV_VARS_PATH = join(process.cwd(), '.dev.vars');
 
 // --- Prompt Helper ---
 const rl = createInterface({ input: process.stdin, output: process.stdout });
-const prompt = (q) => new Promise(resolve => rl.question(q, resolve));
+const prompt = (q) => new Promise(resolve => {
+  rl.question(q, resolve);
+});
 
 // --- Wrangler Runner ---
 function runWrangler(command) {
@@ -70,31 +72,15 @@ if (kvOutput !== 'ALREADY_EXISTS') {
 console.log('-> Creating R2 Bucket (schedsec-backups)...');
 runWrangler('r2 bucket create "schedsec-backups"');
 
-console.log('-> Creating D1 Database (schedsec-cache)...');
-const d1Output = runWrangler('d1 create "schedsec-cache"');
-let d1Id = '';
-if (d1Output !== 'ALREADY_EXISTS') {
-  const m = d1Output.match(/database_id = "([a-f0-9-]+)"/);
-  if (m) d1Id = m[1];
-} else {
-  console.log('   (Already exists — check Cloudflare Dashboard for ID)');
-}
-
-// bge-small-en outputs 384-dimensional vectors
-console.log('-> Creating Vectorize Index (schedsec-learned-rules, 384 dims)...');
-runWrangler('vectorize create "schedsec-learned-rules" --dimensions=384 --metric=cosine');
+// bge-base-en-v1.5 outputs 768-dimensional vectors
+console.log('-> Creating Vectorize Index (schedsec-learned-rules, 768 dims)...');
+runWrangler('vectorize create "schedsec-learned-rules" --dimensions=768 --metric=cosine');
 
 // 3. Inject IDs into wrangler.toml
 if (kvId) {
   tomlContent = tomlContent.replace(
     /\[\[kv_namespaces\]\]\nbinding = "KV"\nid = "[^"]+"/,
     `[[kv_namespaces]]\nbinding = "KV"\nid = "${kvId}"`
-  );
-}
-if (d1Id) {
-  tomlContent = tomlContent.replace(
-    /\[\[d1_databases\]\]\nbinding = "DB"\ndatabase_name = "schedsec-cache"\ndatabase_id = "[^"]+"/,
-    `[[d1_databases]]\nbinding = "DB"\ndatabase_name = "schedsec-cache"\ndatabase_id = "${d1Id}"`
   );
 }
 writeFileSync(WRANGLER_PATH, tomlContent);

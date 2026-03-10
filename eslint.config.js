@@ -68,6 +68,11 @@ export default [
       'jsdoc/require-returns': ['error', {
         forceRequireReturn: false
       }],
+      'jsdoc/check-types': 'off',
+      'jsdoc/no-defaults': 'off',
+      'jsdoc/no-undefined-types': 'off',
+      'jsdoc/reject-any-type': 'off',
+      'jsdoc/reject-function-type': 'off',
       'jsdoc/require-param-type': 'off',
       'jsdoc/require-returns-type': 'off',
       'jsdoc/require-param-description': 'error',

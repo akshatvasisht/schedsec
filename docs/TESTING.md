@@ -19,6 +19,13 @@ Run the full suite using npm:
 ```bash
 npm test
 ```
+
+Run the linter as part of the same verification pass:
+
+```bash
+npm run lint
+```
+
 To run tests in watch mode during development:
 ```bash
 npm run test:watch

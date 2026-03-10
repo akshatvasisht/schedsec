@@ -1,5 +1,3 @@
-import { NotionClient } from '../notion-client.js';
-import { Logger } from '../logger.js';
 import { CONFIG } from '../config.js';
 
 const P = CONFIG.PROPERTIES;
@@ -7,12 +5,12 @@ const P = CONFIG.PROPERTIES;
 /**
  * Nightly Backup Worker (Triggered 2 AM)
  * Creates multi-tier rolling backups of Notion state in R2.
- * @param env The parameter.
- * @returns {any} The return value.
+ * @param {object} env Environment bindings.
+ * @param {object} services Shared service instances for Notion, logging, and context.
+ * @returns {Promise<object>} Backup metadata including the written filename.
  */
-export async function handleBackup(env) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+export async function handleBackup(env, services) {
+  const { notion, logger } = services;
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const dayOfWeek = now.getDay(); // 0=Sunday
@@ -92,14 +90,14 @@ export async function handleBackup(env) {
  * Restores Notion state from a daily R2 backup.
  * Creates a restore-point before overwriting.
  * Supports scoped restore: context, inputs, schedule, or all.
- * @param env The parameter.
- * @param backupDate The parameter.
- * @param scope The parameter.
- * @returns {any} The return value.
+ * @param {object} env Environment bindings.
+ * @param {object} services Shared service instances for Notion, logging, and context.
+ * @param {string} backupDate Backup date string (YYYY-MM-DD).
+ * @param {string} scope Restore scope (`context`, `inputs`, `schedule`, or `all`).
+ * @returns {Promise<object>} Restore summary with restored database names.
  */
-export async function restoreFromBackup(env, backupDate, scope = 'all') {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+export async function restoreFromBackup(env, services, backupDate, scope = 'all') {
+  const { notion, logger } = services;
   const backupKey = `backup_daily_${backupDate}.json`;
 
   const backupObj = await env.R2_BUCKET.get(backupKey);
@@ -143,7 +141,7 @@ export async function restoreFromBackup(env, backupDate, scope = 'all') {
     // Archive existing pages (mark as archived in Notion)
     const existing = await notion.queryDatabase(dbMap[dbName]);
     for (const page of existing.results) {
-      await notion.updatePage(page.id, {}, true); // archive=true
+      await notion.archivePage(page.id);
     }
 
     // Re-create from backup
