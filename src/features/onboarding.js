@@ -49,7 +49,12 @@ export class OnboardingManager {
       maps_to: 'KV:sched_timezone + context:user_timezone_current',
       type: 'text',
       validate: (v) => {
-        try { Intl.DateTimeFormat(undefined, { timeZone: v }); return true; } catch { return false; }
+        try {
+          Intl.DateTimeFormat(undefined, { timeZone: v });
+          return true;
+        } catch {
+          return false;
+        }
       },
       hint: 'Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
     },
@@ -136,11 +141,11 @@ export class OnboardingManager {
     }
 
     // ── Q3: Lunch time constraint ──────────────────────────────────────────────
-    if (answers.lunch_time !== undefined && answers.lunch_time < 3) {
+    if (answers.lunch_time !== undefined) {
       const lunchMap = { 0: 'lunch_11:00-12:00', 1: 'lunch_12:00-13:00', 2: 'lunch_13:00-14:00' };
       const constraints = (await context.get('hard_constraints')) || [];
       const filtered = constraints.filter(c => !c.startsWith('lunch_'));
-      filtered.push(lunchMap[answers.lunch_time]);
+      if (answers.lunch_time < 3) filtered.push(lunchMap[answers.lunch_time]);
       await context.set('hard_constraints', filtered, 'Set by onboarding');
       applied.push('hard_constraints.lunch');
     }

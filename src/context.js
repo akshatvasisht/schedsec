@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js';
+import { SchedSecError } from './errors.js';
 
 /**
  * Helper class for interacting with the Context (Key-Value) database in Notion.
@@ -43,7 +44,7 @@ export class ContextManager {
       this.cache.set(key, value);
       return value;
     } catch (e) {
-      throw new Error(`Failed to parse context value for key ${key}: ${e.message}`);
+      throw new SchedSecError(`Failed to parse context value for key ${key}: ${e.message}`, 'CONTEXT_PARSE_ERROR');
     }
   }
 
@@ -80,7 +81,10 @@ export class ContextManager {
     const unknownKeys = keys.filter(key => !this.pageIds.has(key));
 
     if (unknownKeys.length > 0) {
-      const response = await this.notion.queryDatabase(this.dbId);
+      const filter = unknownKeys.length === 1
+        ? { property: props.KEY, title: { equals: unknownKeys[0] } }
+        : { or: unknownKeys.map(k => ({ property: props.KEY, title: { equals: k } })) };
+      const response = await this.notion.queryDatabase(this.dbId, filter);
       for (const page of response.results) {
         const keyName = page.properties[props.KEY]?.title?.[0]?.plain_text;
         if (keyName && !this.pageIds.has(keyName)) {

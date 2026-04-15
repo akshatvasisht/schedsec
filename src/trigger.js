@@ -4,6 +4,19 @@
  */
 
 /**
+ * Converts a hex string to a Uint8Array.
+ * @param {string} hex - Hex-encoded string.
+ * @returns {Uint8Array} Byte array.
+ */
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+/**
  * Validates a trigger token.
  * @param {string} action - Action name (regenerate, undo, planning).
  * @param {string} dateStr - Date (YYYY-MM-DD).
@@ -34,9 +47,15 @@ export async function validateTriggerToken(action, dateStr, token, secret) {
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
 
-    if (token.toLowerCase() === expected.toLowerCase()) {
-      return true;
+    // Constant-time comparison to prevent timing attacks
+    const tokenBytes = hexToBytes(token.toLowerCase());
+    const expectedBytes = hexToBytes(expected.toLowerCase());
+    if (tokenBytes.length !== expectedBytes.length) return false;
+    let diff = 0;
+    for (let i = 0; i < tokenBytes.length; i++) {
+      diff |= tokenBytes[i] ^ expectedBytes[i];
     }
+    if (diff === 0) return true;
   }
 
   return false;

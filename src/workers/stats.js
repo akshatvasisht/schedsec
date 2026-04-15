@@ -137,11 +137,42 @@ export async function handleStats(env, services) {
 
   // Anomaly Detection — z-score analysis against baseline
   try {
-    const anomalyBaseline = await context.get('anomaly_baseline') || {
-      avg_edit_rate: aiEditRate, stddev_edit_rate: 0.15,
-      avg_completion_rate: completionRate / 100, stddev_completion_rate: 0.15,
-      avg_conflicts: 0, stddev_conflicts: 1
-    };
+    // Bootstrap baseline from Stats DB history on first run instead of using
+    // this week's values as the starting point, which produces a permanently
+    // biased stddev=0.15 default. Seeds from real history if ≥4 weeks exist;
+    // falls back to runtime default on fresh install (no history yet).
+    let anomalyBaseline = await context.get('anomaly_baseline');
+    if (!anomalyBaseline) {
+      const eightWeeksAgo = new Date(now);
+      eightWeeksAgo.setDate(now.getDate() - 56);
+      const histResp = await notion.queryDatabase(env.STATS_DB_ID, {
+        property: P.STATS.WEEK_OF,
+        date: { on_or_after: eightWeeksAgo.toISOString().split('T')[0] }
+      });
+      const hist = histResp.results
+        .map(p => ({
+          editRate: p.properties[P.STATS.AI_EDIT_RATE]?.number,
+          completionRate: p.properties[P.STATS.COMPLETION_RATE]?.number
+        }))
+        .filter(r => r.editRate != null && r.completionRate != null);
+      if (hist.length >= 4) {
+        const meanEdit = hist.reduce((s, r) => s + r.editRate, 0) / hist.length;
+        const meanComp = hist.reduce((s, r) => s + r.completionRate / 100, 0) / hist.length;
+        const stdEdit = Math.sqrt(hist.reduce((s, r) => s + (r.editRate - meanEdit) ** 2, 0) / hist.length);
+        const stdComp = Math.sqrt(hist.reduce((s, r) => s + (r.completionRate / 100 - meanComp) ** 2, 0) / hist.length);
+        anomalyBaseline = {
+          avg_edit_rate: meanEdit, stddev_edit_rate: Math.max(stdEdit, 0.05),
+          avg_completion_rate: meanComp, stddev_completion_rate: Math.max(stdComp, 0.05),
+          avg_conflicts: 0, stddev_conflicts: 1
+        };
+      } else {
+        anomalyBaseline = {
+          avg_edit_rate: aiEditRate, stddev_edit_rate: 0.15,
+          avg_completion_rate: completionRate / 100, stddev_completion_rate: 0.15,
+          avg_conflicts: 0, stddev_conflicts: 1
+        };
+      }
+    }
     const scheduleData = { entries, conflicts: [] };
     const anomalyResult = AnomalyDetector.detectAnomalousSchedule(scheduleData, anomalyBaseline);
     if (anomalyResult.is_anomalous) {
@@ -149,10 +180,54 @@ export async function handleStats(env, services) {
         alerts.push({ type: `ANOMALY_${a.metric.toUpperCase()}`, severity: a.severity, actual: a.current, message: `Anomaly: ${a.metric} z-score=${a.z_score}` });
       }
     }
-    // Update rolling baseline (simple running mean)
+    // Update rolling baseline (80/20 EMA)
     anomalyBaseline.avg_edit_rate = (anomalyBaseline.avg_edit_rate * 0.8) + (aiEditRate * 0.2);
     anomalyBaseline.avg_completion_rate = (anomalyBaseline.avg_completion_rate * 0.8) + ((completionRate / 100) * 0.2);
     await context.set('anomaly_baseline', anomalyBaseline, 'Updated by weekly stats');
+  } catch { /* non-critical */ }
+
+  // Velocity trend — week-over-week delta and burnout risk detection
+  let weekOverWeekDelta = null;
+  try {
+    const threeWeeksAgo = new Date(now);
+    threeWeeksAgo.setDate(now.getDate() - 21);
+    const trendResp = await notion.queryDatabase(env.STATS_DB_ID, {
+      property: P.STATS.WEEK_OF,
+      date: { on_or_after: threeWeeksAgo.toISOString().split('T')[0] }
+    });
+    const weeklyRates = trendResp.results
+      .map(p => ({
+        weekOf: p.properties[P.STATS.WEEK_OF]?.date?.start || '',
+        rate: p.properties[P.STATS.COMPLETION_RATE]?.number ?? null
+      }))
+      .filter(r => r.weekOf && r.rate != null)
+      .sort((a, b) => a.weekOf.localeCompare(b.weekOf));
+
+    if (weeklyRates.length >= 1) {
+      const lastWeekRate = weeklyRates[weeklyRates.length - 1].rate;
+      weekOverWeekDelta = completionRate - lastWeekRate;
+      if (weekOverWeekDelta <= -thresholds.MAX_WOW_COMPLETION_DROP) {
+        alerts.push({
+          type: 'DECLINING_COMPLETION',
+          severity: 'WARNING',
+          actual: completionRate,
+          delta: weekOverWeekDelta,
+          message: `Completion rate dropped ${Math.abs(weekOverWeekDelta)}pp this week (${lastWeekRate}% → ${completionRate}%)`
+        });
+      }
+    }
+
+    if (weeklyRates.length >= 3) {
+      const last3 = weeklyRates.slice(-3);
+      if (last3[0].rate > last3[1].rate && last3[1].rate > last3[2].rate) {
+        alerts.push({
+          type: 'BURNOUT_RISK',
+          severity: 'WARNING',
+          actual: last3[2].rate,
+          message: `Completion rate declining 3 consecutive weeks: ${last3.map(r => r.rate + '%').join(' → ')}`
+        });
+      }
+    }
   } catch { /* non-critical */ }
 
   // Write to Stats DB
@@ -172,6 +247,6 @@ export async function handleStats(env, services) {
     [P.STATS.QUALITY_ALERTS]: { rich_text: [{ text: { content: JSON.stringify(alerts).substring(0, 2000) } }] }
   });
 
-  await logger.info('Weekly stats generated', { completionRate, totalTasks, alerts: alerts.length, completionStreak, deepWorkStreak });
-  return { completionRate, totalTasks, completedTasks, aiEditRate, avgDurationAccuracy, alerts, completionStreak, deepWorkStreak };
+  await logger.info('Weekly stats generated', { completionRate, totalTasks, alerts: alerts.length, completionStreak, deepWorkStreak, weekOverWeekDelta });
+  return { completionRate, totalTasks, completedTasks, aiEditRate, avgDurationAccuracy, alerts, completionStreak, deepWorkStreak, weekOverWeekDelta };
 }

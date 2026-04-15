@@ -6,9 +6,9 @@ export class PromptCompressor {
   /**
    * Compresses a list of learned rules to fit within a token budget.
    * Groups rules by condition, removes duplicates, and shortens phrasing.
-   * @param rules The parameter.
-   * @param maxTokens The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object|string>} rules Learned rules, each with condition/action fields or as a "condition → action" string.
+   * @param {number} maxTokens Maximum number of tokens the result may occupy (estimated at 4 chars per token).
+   * @returns {string} Newline-separated compressed rule text, trimmed to fit the token budget.
    */
   static compressLearnedRules(rules, maxTokens = 500) {
     if (!rules || rules.length === 0) return '';
@@ -56,8 +56,8 @@ export class PromptCompressor {
 
   /**
    * Extracts the condition part of a rule.
-   * @param rule The parameter.
-   * @returns {any} The return value.
+   * @param {object|string} rule Rule object with a condition field, or a "condition → action" string.
+   * @returns {string} Lowercased first word of the condition, used as a grouping key.
    */
   static extractCondition(rule) {
     if (typeof rule === 'string') {
@@ -69,8 +69,8 @@ export class PromptCompressor {
 
   /**
    * Extracts the action part of a rule.
-   * @param rule The parameter.
-   * @returns {any} The return value.
+   * @param {object|string} rule Rule object with an action field, or a "condition → action" string.
+   * @returns {string} Lowercased action text, used for deduplication within a condition group.
    */
   static extractAction(rule) {
     if (typeof rule === 'string') {
@@ -82,8 +82,8 @@ export class PromptCompressor {
 
   /**
    * Shortens verbose rule text while preserving meaning.
-   * @param text The parameter.
-   * @returns {any} The return value.
+   * @param {string} text Rule text to shorten using common abbreviation substitutions.
+   * @returns {string} Abbreviated text with reduced character count.
    */
   static shortenText(text) {
     return text

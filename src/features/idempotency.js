@@ -4,8 +4,8 @@
  */
 export class IdempotencyManager {
   /**
-   *
-   * @param kv The parameter.
+   * Creates an IdempotencyManager backed by the given KV binding.
+   * @param {object} kv Cloudflare KV binding used to read and write idempotency records.
    */
   constructor(kv) {
     this.kv = kv;
@@ -13,9 +13,9 @@ export class IdempotencyManager {
 
   /**
    * Generates a key for a specific run.
-   * @param date The parameter.
-   * @param type The parameter.
-   * @returns {any} The return value.
+   * @param {string} date Date string (YYYY-MM-DD) identifying the scheduled run.
+   * @param {string} type Worker type identifier (e.g. "preview" or "final").
+   * @returns {string} KV key in the form "idempotent_<type>_<date>".
    */
   generateKey(date, type) {
     return `idempotent_${type}_${date}`;
@@ -23,8 +23,8 @@ export class IdempotencyManager {
 
   /**
    * Checks if a run is already processed or in progress.
-   * @param key The parameter.
-   * @returns {any} The return value.
+   * @param {string} key KV key previously returned by generateKey.
+   * @returns {Promise<string|null>} "processing", "completed", or null if no record exists.
    */
   async check(key) {
     return await this.kv.get(key);
@@ -33,7 +33,7 @@ export class IdempotencyManager {
   /**
    * Marks a run as processing.
    * TTL: 1 hour (locks for 1 hour max)
-   * @param key The parameter.
+   * @param {string} key KV key previously returned by generateKey.
    */
   async lock(key) {
     await this.kv.put(key, 'processing', { expirationTtl: 3600 });
@@ -42,7 +42,7 @@ export class IdempotencyManager {
   /**
    * Marks a run as completed.
    * TTL: 24 hours (prevents double-run within same day)
-   * @param key The parameter.
+   * @param {string} key KV key previously returned by generateKey.
    */
   async complete(key) {
     await this.kv.put(key, 'completed', { expirationTtl: 86400 });
@@ -50,7 +50,7 @@ export class IdempotencyManager {
 
   /**
    * Releases a lock (e.g. on failure).
-   * @param key The parameter.
+   * @param {string} key KV key previously returned by generateKey.
    */
   async release(key) {
     await this.kv.delete(key);

@@ -2,8 +2,7 @@ import { CONFIG } from '../config.js';
 import { PromptCompressor } from '../learning/prompt-compression.js';
 
 /**
- * Prompt Builder
- * Full AI prompt construction.
+ * Builds the full prompt sent to Cloudflare AI for task placement.
  */
 export class PromptBuilder {
   /**
@@ -20,7 +19,7 @@ export class PromptBuilder {
 
   /**
    * Few-shot examples for deterministic JSON output.
-   * @returns {any} The return value.
+   * @returns {string} Multi-line string with two input/output example pairs used to prime the model.
    */
   static getFewShotExamples() {
     return `
@@ -40,9 +39,9 @@ EXAMPLE OUTPUT:
   /**
    * Builds the complete prompt for Cloudflare AI (Qwen 2.5 7B).
    * Returns prompt text, estimated token count, and version.
-   * @param tasks The parameter.
-   * @param context The parameter.
-   * @returns {{ prompt: string, tokenEstimate: number, version: string }} Prompt output.
+   * @param {Array<object>} tasks Validated, inferred tasks ready for AI placement.
+   * @param {object} context Scheduling context including dates, rules, slots, constraints, and hints.
+   * @returns {{ prompt: string, tokenEstimate: number, version: string }} Final prompt, character-based token estimate, and prompt version tag.
    */
   static buildPrompt(tasks, context) {
     const {
@@ -176,10 +175,10 @@ YOUR OUTPUT (JSON ONLY):`;
     if (tokenEstimate > TOKEN_LIMIT) {
       // Drop sections in priority order until under budget
       const optionalSections = [
-        { label: 'BATCHING HINTS', regex: /\nBATCHING HINTS:[\s\S]*?(?=\n[A-Z])/m },
-        { label: 'SLOT HINTS', regex: /\nSLOT HINTS:[\s\S]*?(?=\n[A-Z])/m },
-        { label: 'ENERGY PEAK', regex: /\nENERGY PEAK:[\s\S]*?(?=\n[A-Z])/m },
-        { label: 'LEARNED BUFFERS', regex: /\nLEARNED BUFFER TIMES:[\s\S]*?(?=\n[A-Z])/m },
+        { label: 'BATCHING HINTS', regex: /\nBATCHING HINTS:[\s\S]*?(?=\n[A-Z]|$)/m },
+        { label: 'SLOT HINTS', regex: /\nSLOT HINTS:[\s\S]*?(?=\n[A-Z]|$)/m },
+        { label: 'ENERGY PEAK', regex: /\nENERGY PEAK:[\s\S]*?(?=\n[A-Z]|$)/m },
+        { label: 'LEARNED BUFFERS', regex: /\nLEARNED BUFFER TIMES:[\s\S]*?(?=\n[A-Z]|$)/m },
       ];
       for (const section of optionalSections) {
         if (Math.ceil(finalPrompt.length / 4) <= TOKEN_LIMIT) break;

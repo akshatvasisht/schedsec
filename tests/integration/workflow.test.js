@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CriticalPathAnalyzer } from '../../src/scheduler/critical-path.js';
 import { CollaborativeFilter } from '../../src/scheduler/collaborative-filter.js';
 import { TimeSlotBandit } from '../../src/scheduler/time-slot-bandit.js';
@@ -12,13 +12,16 @@ import { PromptCompressor } from '../../src/learning/prompt-compression.js';
  */
 
 describe('CriticalPathAnalyzer', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-06-01')); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it('detects infeasible chains', () => {
     const tasks = [
       { id: 't1', name: 'Research', duration: 480, estimatedDays: 3, dependsOn: [], deadline: null },
       { id: 't2', name: 'Design', duration: 480, estimatedDays: 3, dependsOn: ['t1'], deadline: null },
       {
         id: 't3', name: 'Build', duration: 480, estimatedDays: 3, dependsOn: ['t2'],
-        deadline: new Date(Date.now() + 5 * 86400000).toISOString()
+        deadline: '2026-06-06T00:00:00.000Z'
       } // 5 days from now
     ];
 
@@ -33,7 +36,7 @@ describe('CriticalPathAnalyzer', () => {
     const tasks = [
       {
         id: 't1', name: 'Quick task', duration: 60, estimatedDays: 1, dependsOn: [],
-        deadline: new Date(Date.now() + 10 * 86400000).toISOString()
+        deadline: '2026-06-11T00:00:00.000Z'
       }
     ];
     const result = CriticalPathAnalyzer.calculateCriticalPath(tasks);
@@ -48,6 +51,17 @@ describe('CriticalPathAnalyzer', () => {
     ]);
     const path = CriticalPathAnalyzer.reconstructPath('t3', taskMap);
     expect(path).toEqual(['A', 'B', 'C']);
+  });
+
+  it('handles circular dependencies without crashing', () => {
+    const tasks = [
+      { id: 't1', name: 'A', dependsOn: ['t2'], deadline: '2026-07-01T00:00:00.000Z' },
+      { id: 't2', name: 'B', dependsOn: ['t3'] },
+      { id: 't3', name: 'C', dependsOn: ['t1'] }
+    ];
+    const result = CriticalPathAnalyzer.calculateCriticalPath(tasks);
+    // Should not throw — cycles are handled gracefully
+    expect(result).toBeDefined();
   });
 });
 

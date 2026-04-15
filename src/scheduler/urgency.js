@@ -5,9 +5,9 @@ export class UrgencyCalculator {
   /**
    * Calculates a score representing task urgency.
    * Higher score = higher priority for scheduling.
-   * @param task The parameter.
-   * @param currentDate The parameter.
-   * @returns {any} The return value.
+   * @param {object} task Task with optional `priority`, `deadline`, and `estimated_days` fields.
+   * @param {Date} currentDate Reference date used to compute days remaining until deadline.
+   * @returns {number} Urgency score combining priority weight, deadline proximity, and multi-day boost.
    */
   static calculateUrgency(task, currentDate = new Date()) {
     let score = 0;
@@ -19,7 +19,9 @@ export class UrgencyCalculator {
     // Deadline Urgency
     if (task.deadline) {
       const deadlineDate = new Date(task.deadline);
-      const daysRemaining = (deadlineDate - currentDate) / (1000 * 60 * 60 * 24);
+      if (isNaN(deadlineDate.getTime())) return score;
+      const todayNormalized = new Date(currentDate.toISOString().split('T')[0]);
+      const daysRemaining = (deadlineDate - todayNormalized) / (1000 * 60 * 60 * 24);
 
       if (daysRemaining <= 1) score += 500; // Due today/tomorrow
       else if (daysRemaining <= 3) score += 200;
@@ -36,8 +38,8 @@ export class UrgencyCalculator {
 
   /**
    * Sorts tasks by urgency (descending).
-   * @param tasks The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object>} tasks Tasks to sort; original array is not mutated.
+   * @returns {Array<object>} New array with highest-urgency tasks first.
    */
   static sortByUrgency(tasks) {
     return [...tasks].sort((a, b) => this.calculateUrgency(b) - this.calculateUrgency(a));

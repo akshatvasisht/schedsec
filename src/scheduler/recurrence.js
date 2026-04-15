@@ -8,11 +8,15 @@ import { CONFIG } from '../config.js';
 export class RecurrenceManager {
   /**
    * Checks if a recurring task should have an instance for the target date.
-   * @param task The parameter.
-   * @param targetDateStr The parameter.
+   * @param {object} task - The recurring task object.
+   * @param {string} targetDateStr - Target date (YYYY-MM-DD).
+   * @param {string[]|null} [workDays] - Array of full day names to schedule on (e.g. ['Monday','Friday']).
+   *   Applies to non-specific patterns (Daily, Weekday, Every-N-Days, Day N).
+   *   Named-day patterns (e.g. recurrence='Saturday', 'Biweekly-Monday') are exempt because
+   *   the user explicitly chose those days.
    * @returns {boolean} True if an instance should be generated.
    */
-  static shouldGenerate(task, targetDateStr) {
+  static shouldGenerate(task, targetDateStr, workDays = null) {
     if (!task.recurrence || task.status !== CONFIG.STATUS.TASK.ACTIVE) return false;
 
     const lastGen = task.last_generated || '1970-01-01';
@@ -24,6 +28,16 @@ export class RecurrenceManager {
     const dayName = dateUTC.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
     const dayOfMonth = da;
     const recurrence = task.recurrence;
+
+    // work_days filter: skip non-working days for automatic patterns.
+    // Exempt: named-day patterns where the user explicitly chose the day.
+    if (workDays) {
+      const isNamedDay = recurrence === dayName ||
+        recurrence === 'Weekend' ||
+        recurrence.startsWith('Biweekly-') ||
+        /^\d+(?:st|nd|rd|th)-\w+$/.test(recurrence);
+      if (!isNamedDay && !workDays.includes(dayName)) return false;
+    }
 
     // Simple pattern matching — original patterns
     if (recurrence === 'Daily') return true;
@@ -68,10 +82,10 @@ export class RecurrenceManager {
   }
 
   /**
-   * Creates a task instance for a recurring pattern.
-   * @param parentTask The parameter.
-   * @param targetDateStr The parameter.
-   * @returns {object} Generated task instance.
+   * Creates a one-off task instance from a recurring parent for the given date.
+   * @param {object} parentTask - The parent recurring task from the Inputs DB.
+   * @param {string} targetDateStr - Date to generate the instance for (YYYY-MM-DD).
+   * @returns {object} Generated task instance with `parent_id` and `is_instance` set.
    */
   static createInstance(parentTask, targetDateStr) {
     return {

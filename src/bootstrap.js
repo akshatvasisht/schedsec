@@ -1,6 +1,3 @@
-import { NotionClient } from './notion-client.js';
-import { Logger } from './logger.js';
-import { ContextManager } from './context.js';
 import { VectorizeManager } from './learning/vectorize.js';
 import { CONFIG } from './config.js';
 
@@ -10,12 +7,11 @@ const P = CONFIG.PROPERTIES;
  * Cold Start Seeding
  * Seeds baseline context, example tasks, and starter Vectorize rules for a new install.
  * @param {object} env Worker environment bindings.
+ * @param {object} services Shared service instances (notion, logger, context).
  * @returns {Promise<object>} Summary of how many records were seeded.
  */
-export async function bootstrapSystem(env) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
+export async function bootstrapSystem(env, services) {
+  const { notion, logger, context } = services;
   const vectorize = new VectorizeManager(env);
 
   // Check if already seeded
@@ -170,12 +166,11 @@ export async function bootstrapSystem(env) {
  * Clean up bootstrap data after system matures.
  * Removes unused bootstrap patterns and promotes heavily reinforced defaults.
  * @param {object} env Worker environment bindings.
+ * @param {object} services Shared service instances (notion, logger, context).
  * @returns {Promise<object|undefined>} Cleanup summary, or `undefined` if no patterns exist yet.
  */
-export async function cleanupBootstrapData(env) {
-  const notion = new NotionClient(env.NOTION_API_KEY);
-  const context = new ContextManager(notion, env.CONTEXT_DB_ID);
-  const logger = new Logger(notion, env.LOGS_DB_ID, env);
+export async function cleanupBootstrapData(env, services) {
+  const { logger, context } = services;
 
   const patterns = await context.get('inference_patterns_v2');
   if (!patterns) return;

@@ -76,7 +76,7 @@ describe('ConfidenceDecay', () => {
     });
 
     it('handles empty patterns object', () => {
-      const result = ConfidenceDecay.decayAll({}, new Date());
+      const result = ConfidenceDecay.decayAll({}, new Date('2026-06-01'));
       expect(Object.keys(result).length).toBe(0);
     });
   });

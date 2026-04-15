@@ -27,9 +27,9 @@ export function minutesToTime(totalMinutes) {
 
 /**
  * Adds minutes to a HH:MM time string.
- * @param timeStr The parameter.
- * @param minsToAdd The parameter.
- * @returns {any} The return value.
+ * @param {string} timeStr Starting time in "HH:MM" format.
+ * @param {number} minsToAdd Number of minutes to add, may be negative or exceed 60.
+ * @returns {string} Resulting time in "HH:MM" format, wrapping at midnight.
  */
 export function addMinutes(timeStr, minsToAdd) {
   return minutesToTime(timeToMinutes(timeStr) + minsToAdd);
@@ -37,11 +37,11 @@ export function addMinutes(timeStr, minsToAdd) {
 
 /**
  * Checks if two time ranges overlap.
- * @param start1 The parameter.
- * @param duration1 The parameter.
- * @param start2 The parameter.
- * @param duration2 The parameter.
- * @returns {any} The return value.
+ * @param {string} start1 Start time of the first range in "HH:MM" format.
+ * @param {number} duration1 Duration of the first range in minutes.
+ * @param {string} start2 Start time of the second range in "HH:MM" format.
+ * @param {number} duration2 Duration of the second range in minutes.
+ * @returns {boolean} True if the two ranges share any overlapping time.
  */
 export function rangesOverlap(start1, duration1, start2, duration2) {
   const s1 = timeToMinutes(start1);
@@ -54,20 +54,11 @@ export function rangesOverlap(start1, duration1, start2, duration2) {
 
 /**
  * Calculates minutes between two HH:MM strings.
- * @param startStr The parameter.
- * @param endStr The parameter.
- * @returns {any} The return value.
+ * @param {string} startStr Earlier time in "HH:MM" format.
+ * @param {string} endStr Later time in "HH:MM" format.
+ * @returns {number} Signed difference in minutes; negative if endStr is before startStr.
  */
 export function diffMinutes(startStr, endStr) {
   return timeToMinutes(endStr) - timeToMinutes(startStr);
 }
 
-/**
- * Gets day of week name from date string.
- * @param dateStr The parameter.
- * @returns {any} The return value.
- */
-export function getDayName(dateStr) {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', { weekday: 'long' });
-}

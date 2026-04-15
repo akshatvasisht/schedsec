@@ -28,30 +28,6 @@ export class UndoManager {
   }
 
   /**
-   * Restores a schedule from a snapshot.
-   * Legacy helper that returns snapshot contents without mutating Notion.
-   * @param {string} date Date string (YYYY-MM-DD).
-   * @param {string} _scheduleDbId Unused legacy parameter preserved for compatibility.
-   * @returns {Promise<object>} Snapshot payload or `NO_SNAPSHOT`.
-   */
-  async rollback(date, _scheduleDbId) {
-    const key = `undo_${date}`;
-    const snapshot = await this.kv.get(key);
-
-    if (!snapshot) return { success: false, error: 'NO_SNAPSHOT' };
-
-    const previousData = JSON.parse(snapshot);
-
-    // Delete current schedule (marks as Archived/Deleted)
-    // Implementation details: Ideally we'd batch delete, but Notion is page-based.
-
-    // Re-create entries from snapshot
-    // This logic usually lives in the worker calling UndoManager.
-
-    return { success: true, data: previousData };
-  }
-
-  /**
    * Checks if a snapshot exists for the given date.
    * @param {string} date - Date string (YYYY-MM-DD).
    * @returns {Promise<boolean>} True when a snapshot exists for the date.

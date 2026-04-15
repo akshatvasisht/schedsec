@@ -52,7 +52,7 @@ You must grant your integration access to your Dashboard page:
 ## 3. Configuration & Deployment
 
 ### Environment Variables
-Populate your `.dev.vars` file with your Notion secret and database IDs (extracted from the Notion URLs):
+`npm run setup` prompts for these interactively and writes `.dev.vars` for you. If you prefer to fill them manually:
 
 ```env
 NOTION_API_KEY="secret_your_notion_integration_secret"
@@ -64,6 +64,17 @@ STATS_DB_ID="your_stats_db_id"
 WORKER_AUTH_TOKEN="generate_a_secure_random_string"
 BUTTON_SECRET="generate_another_random_string"
 ```
+
+### Finding Database IDs
+Each database ID is in its Notion URL. Open a database as a **full page** (not inline), then copy the ID from the URL:
+
+```
+https://www.notion.so/yourworkspace/317c470f750180dd98d1fcbd34266400?v=...
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                    This 32-character hex string is the DB ID
+```
+
+Do this for all five databases: Inputs, Schedule, Context, Logs, and Stats.
 
 ### Production Deployment
 Upload your secrets to Cloudflare securely and push the code:
@@ -77,44 +88,14 @@ npm run deploy
 ## 4. Notion UI Setup (Form + Templates + Schedule Views + Buttons)
 
 ### A. Capture Form (Inputs DB)
-Use a real Notion **Form** as your primary input surface (instead of a table with hidden columns):
-1. Open the **Inputs** database.
-2. Click **+ Add a view** → **Form** (or type `/form`).
-3. Add these questions:
-
-| # | Field | Required | Description |
-|---|---|---|---|
-| 1 | `Task` | Yes | What do you need to do? |
-| 2 | `Deadline` | No | When is this due? |
-| 3 | `Duration` | No | Estimated minutes (leave blank to let scheduler infer). |
-| 4 | `Priority` | No | High / Medium / Low (defaults to Medium). |
-| 5 | `Task_Type` | No | TASK, FIXED_APPOINTMENT, or TIME_BLOCK. |
-| 6 | `Energy` | No | Deep / Moderate / Light (defaults to Moderate). |
-| 7 | `Time_Preference` | No | Morning / Midday / Afternoon / Evening / Anytime. |
-| 8 | `Fixed_Time` | No | Only for appointments; leave blank for regular tasks. |
-| 9 | `Recurrence` | No | Daily, Weekday, or specific day. |
-| 10 | `Notes` | No | Any additional context. |
-
-Keep these **off** the form (system-managed): `Status`, `Background`, `Must_Complete_By`, `Depends_On`, `Learned_Rules`, `Multi_Day_State`, `Recurrence_State`, `Last_Generated`, `Estimated_Days`, `Weekly_Target`, `Created`, `Updated`.
+Create a Notion **Form** view on the Inputs database (`+ Add a view` → `Form`). Add fields: `Task` (required), `Deadline`, `Duration`, `Priority`, `Task_Type`, `Energy`, `Time_Preference`, `Fixed_Time`, `Recurrence`, `Notes`. Hide system-managed fields (`Status`, `Background`, `Must_Complete_By`, `Depends_On`, `Learned_Rules`, `Multi_Day_State`, `Recurrence_State`, `Last_Generated`, `Estimated_Days`, `Weekly_Target`, `Created`, `Updated`).
 
 ### B. Database Templates (Inputs DB)
-Create these one-time templates in Notion so new tasks start with valid defaults:
+In the Inputs database, click the dropdown beside **New** → **+ New template** and create three:
 
-1. In the **Inputs** database, click the dropdown beside **New** → **+ New template**.
-2. Create template: `Quick Task` (set as default template):
-   - `Status` = `Active`
-   - `Task_Type` = `TASK`
-   - `Priority` = `Medium`
-   - `Energy` = `Moderate`
-   - `Time_Preference` = `Anytime`
-3. Create template: `Appointment`:
-   - `Status` = `Active`
-   - `Task_Type` = `FIXED_APPOINTMENT`
-4. Create template: `Time Block`:
-   - `Status` = `Active`
-   - `Task_Type` = `TIME_BLOCK`
-
-These templates align Notion defaults with SchedSec runtime defaults, while still allowing inference to fill remaining fields.
+- **Quick Task** (default): `Status=Active`, `Task_Type=TASK`, `Priority=Medium`, `Energy=Moderate`, `Time_Preference=Anytime`
+- **Appointment**: `Status=Active`, `Task_Type=FIXED_APPOINTMENT`
+- **Time Block**: `Status=Active`, `Task_Type=TIME_BLOCK`
 
 ### C. Schedule Views (Schedule DB)
 Create two views on the **Schedule** database:
@@ -147,9 +128,26 @@ Place trigger buttons at the top of your **SchedSec Dashboard** page:
 ---
 
 ## 5. Verification
-- **Health Check**: Visit `https://YOUR_WORKER_URL/health` (requires Bearer Auth).
-- **Bootstrap**: Run `POST /bootstrap` with your `WORKER_AUTH_TOKEN` to seed your Context and add example tasks.
-- **Schema**: Run `npm run verify-schema` to confirm your Notion connection is mapped correctly.
+
+### A. Verify Schema
+Confirm your Notion databases have the correct properties:
+```bash
+npm run verify-schema
+```
+This checks all five databases against the property names SchedSec expects. Fix any `[FAIL]` entries in Notion before continuing.
+
+### B. Health Check
+After deploying, verify the worker is running:
+```bash
+curl -H "Authorization: Bearer YOUR_WORKER_AUTH_TOKEN" https://YOUR_WORKER_URL/health
+```
+
+### C. Bootstrap
+Seed your Context DB with starter patterns, learned rules, and example tasks:
+```bash
+curl -X POST -H "Authorization: Bearer YOUR_WORKER_AUTH_TOKEN" https://YOUR_WORKER_URL/bootstrap
+```
+This is idempotent — running it twice will not duplicate data. The example tasks (Morning standup, Focus time, Email review) can be edited or deleted from your Inputs DB after verifying the system works.
 
 ---
 
@@ -252,4 +250,49 @@ curl -X POST https://YOUR_WORKER_URL/onboard \
 ```
 
 All option values are **0-indexed** (first option = 0). After a manual call, you'll need to compute the UTC cron strings yourself and update `wrangler.toml` + `src/index.js` manually — or run `npm run configure-times` to have the script handle it.
+
+---
+
+## 8. Mobile Shortcuts & Automation
+
+All SchedSec endpoints are accessible over HTTP with a bearer token, so any HTTP-capable automation tool (iOS Shortcuts, Android Tasker, curl scripts) can trigger actions directly.
+
+### iOS Shortcuts
+
+**Step 1 — Store your credentials** (do this once):
+
+1. Open **Shortcuts → Settings → iCloud** and note you can store values in a Personal Automation or use the "Text" action as a constant.
+2. Create a new shortcut called **"SchedSec Auth"** with a single **Text** action containing `Bearer YOUR_WORKER_AUTH_TOKEN`. Name the output `SchedSec Token`. You'll reference this from other shortcuts.
+
+**Step 2 — Create a shortcut for each action:**
+
+| Action | Method | Endpoint |
+|---|---|---|
+| Force regenerate today's schedule | `GET` | `/regenerate` |
+| Undo last regeneration | `GET` | `/undo` |
+| View weekly stats | `GET` | `/stats` |
+| Check system health | `GET` | `/health` |
+| Trigger preview (test) | `GET` | `/preview` |
+
+For each shortcut, use a **"Get Contents of URL"** action:
+- **URL**: `https://YOUR_WORKER_URL/regenerate` (replace endpoint as needed)
+- **Method**: GET
+- **Headers**: Add header `Authorization` → value from **SchedSec Auth** shortcut (or paste the token directly)
+
+**Step 3 — Add to Home Screen or Back Tap:**
+
+Tap the shortcut → **Share** → **Add to Home Screen** for a one-tap button. Or go to **Settings → Accessibility → Touch → Back Tap** and assign a shortcut to double/triple tap.
+
+### Other Automation Tools
+
+```bash
+# curl — regenerate from any terminal
+curl -H "Authorization: Bearer YOUR_WORKER_AUTH_TOKEN" https://YOUR_WORKER_URL/regenerate
+
+# curl — export this week's schedule as ICS and open in calendar
+curl -H "Authorization: Bearer YOUR_WORKER_AUTH_TOKEN" \
+  "https://YOUR_WORKER_URL/export?format=ics&days=7" -o schedule.ics
+```
+
+Replace `YOUR_WORKER_URL` with your deployed worker URL (visible in `wrangler deploy` output or Cloudflare Dashboard → Workers) and `YOUR_WORKER_AUTH_TOKEN` with the value from your Wrangler secrets.
 

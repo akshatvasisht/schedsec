@@ -4,8 +4,7 @@
  */
 export class TimeSlotBandit {
   /**
-   *
-   * @param data The parameter.
+   * @param {object|null} data Serialized bandit state from `toJSON()`, or null to start fresh.
    */
   constructor(data = null) {
     this.slots = data?.slots || {
@@ -19,7 +18,7 @@ export class TimeSlotBandit {
 
   /**
    * Selects the best slot using epsilon-greedy with UCB.
-   * @returns {any} The return value.
+   * @returns {string} Slot name (`morning`, `midday`, `afternoon`, or `evening`).
    */
   selectSlot() {
     if (Math.random() < this.epsilon) {
@@ -49,8 +48,8 @@ export class TimeSlotBandit {
 
   /**
    * Records a reward (completion rating 1-5) for a given slot.
-   * @param slot The parameter.
-   * @param reward The parameter.
+   * @param {string} slot Slot name to update (`morning`, `midday`, `afternoon`, or `evening`).
+   * @param {number} reward Completion rating (1–5) to add to the slot's cumulative reward.
    */
   updateReward(slot, reward) {
     if (!this.slots[slot]) return;
@@ -60,7 +59,7 @@ export class TimeSlotBandit {
 
   /**
    * Returns the total number of tries across all slots.
-   * @returns {any} The return value.
+   * @returns {number} Sum of `tries` for all four time slots.
    */
   getTotalTries() {
     return Object.values(this.slots).reduce((sum, s) => sum + s.tries, 0);
@@ -68,7 +67,7 @@ export class TimeSlotBandit {
 
   /**
    * Returns human-readable stats for each slot.
-   * @returns {any} The return value.
+   * @returns {object} Map of slot name to `{ avg_rating: string, attempts: number }`.
    */
   getStats() {
     const stats = {};
@@ -83,7 +82,7 @@ export class TimeSlotBandit {
 
   /**
    * Serializes state for storage in Context DB.
-   * @returns {any} The return value.
+   * @returns {{ slots: object, epsilon: number }} Plain object suitable for JSON storage.
    */
   toJSON() {
     return { slots: this.slots, epsilon: this.epsilon };
@@ -98,8 +97,8 @@ export class BanditManager {
 
   /**
    * Loads all bandits from context, returning a map of taskType -> TimeSlotBandit.
-   * @param context The parameter.
-   * @returns {any} The return value.
+   * @param {object} context ContextManager instance used to read persisted bandit data.
+   * @returns {Promise<object>} Map of task type string to its corresponding TimeSlotBandit instance.
    */
   static async loadAll(context) {
     const raw = await context.get(BanditManager.CONTEXT_KEY) || {};
@@ -112,8 +111,8 @@ export class BanditManager {
 
   /**
    * Saves all bandits back to context.
-   * @param bandits The parameter.
-   * @param context The parameter.
+   * @param {object} bandits Map of task type string to TimeSlotBandit instance.
+   * @param {object} context ContextManager instance used to persist the serialized bandits.
    */
   static async saveAll(bandits, context) {
     const serialized = {};
@@ -125,9 +124,9 @@ export class BanditManager {
 
   /**
    * Gets or creates a bandit for a specific task type.
-   * @param bandits The parameter.
-   * @param taskType The parameter.
-   * @returns {any} The return value.
+   * @param {object} bandits Mutable map of task type string to TimeSlotBandit instance.
+   * @param {string} taskType Task type key (e.g. `'TASK'`, `'TIME_BLOCK'`).
+   * @returns {TimeSlotBandit} Existing bandit for the task type, or a newly created one.
    */
   static getOrCreate(bandits, taskType) {
     if (!bandits[taskType]) {

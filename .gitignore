@@ -26,3 +26,5 @@ Thumbs.db
 
 # Agent context
 /agentcontext
+.gitnexus
+.claude/

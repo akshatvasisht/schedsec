@@ -7,18 +7,18 @@ import { CollaborativeFilter } from './collaborative-filter.js';
 export class InferenceEngine {
   /**
    * Main entry point for field inference.
-   * @param task The parameter.
-   * @param patterns The parameter.
-   * @param rules The parameter.
-   * @param historicalTasks Optional array of historical tasks for collaborative filtering.
-   * @returns {any} The return value.
+   * @param {object} task Task with potentially blank `duration`, `energy`, or `priority` fields.
+   * @param {object} patterns Keyword-to-field-value map used for name-based pattern matching.
+   * @param {Array<object>} rules Structured rules from Vectorize for exact condition matching.
+   * @param {Array<object>} historicalTasks Optional array of historical tasks for collaborative filtering.
+   * @returns {object} Task copy with all inferred fields filled in.
    */
   static inferFields(task, patterns = {}, rules = [], historicalTasks = []) {
     const inferred = { ...task };
     const fields = ['duration', 'energy', 'priority'];
 
     for (const field of fields) {
-      if (!inferred[field]) {
+      if (inferred[field] == null) {
         // Step 1: Explicit Rules (from Vectorize/User edits)
         const ruleMatch = this._matchRule(inferred, field, rules);
         if (ruleMatch) {
@@ -52,10 +52,10 @@ export class InferenceEngine {
 
   /**
    * Match against structured rules.
-   * @param task The parameter.
-   * @param field The parameter.
-   * @param rules The parameter.
-   * @returns {any} The return value.
+   * @param {object} task Task whose name is matched against rule conditions.
+   * @param {string} field Field name to extract from the matching rule's action (e.g. `'duration'`).
+   * @param {Array<object>} rules Vectorize rules with `condition` and `action` strings.
+   * @returns {string|number|null} Inferred value from the matched rule, or null if no rule matched.
    */
   static _matchRule(task, field, rules) {
     // Basic exact match for now; semantic search happens in the worker
@@ -64,17 +64,18 @@ export class InferenceEngine {
     );
     if (match) {
       const actionValue = match.action.split('=')[1];
-      return isNaN(actionValue) ? actionValue : parseInt(actionValue);
+      if (actionValue === undefined) return null;
+      return isNaN(actionValue) ? actionValue : parseFloat(actionValue);
     }
     return null;
   }
 
   /**
    * Match keywords in task name against patterns.
-   * @param taskName The parameter.
-   * @param field The parameter.
-   * @param patterns The parameter.
-   * @returns {any} The return value.
+   * @param {string} taskName Task name to tokenize and look up in the patterns map.
+   * @param {string} field Field name to retrieve from the matched pattern entry.
+   * @param {object} patterns Keyword-to-field-value map built from learning data.
+   * @returns {any} The matched field value, or null if no pattern keyword matched.
    */
   static _matchPattern(taskName, field, patterns) {
     const keywords = taskName.toLowerCase().split(/\s+/);
@@ -88,8 +89,8 @@ export class InferenceEngine {
 
   /**
    * Extracts keywords from a task name for pattern learning.
-   * @param name The parameter.
-   * @returns {any} The return value.
+   * @param {string} name Task name to tokenize.
+   * @returns {Array<string>} Lowercase words longer than 3 characters with punctuation removed.
    */
   static extractKeywords(name) {
     return name.toLowerCase()

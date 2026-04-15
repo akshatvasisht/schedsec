@@ -41,7 +41,14 @@ function generateToken() {
 
 console.log('\nSchedSec Setup\n--------------');
 
-// 1. Check Wrangler
+// 1. Check Node version
+const [major] = process.versions.node.split('.').map(Number);
+if (major < 18) {
+  console.error(`Node.js >= 18 required (found ${process.versions.node}). Please upgrade.`);
+  process.exit(1);
+}
+
+// 2. Check Wrangler
 try {
   execSync('npx wrangler --version', { stdio: 'ignore' });
 } catch {
@@ -92,6 +99,32 @@ console.log('  Duplicate the template at: https://mirage-earth-76c.notion.site/S
 console.log('  Then create an Internal Integration at: https://www.notion.so/my-integrations\n');
 
 const notionKey = await prompt('Notion API Key (secret_...): ');
+
+// Test Notion API connectivity before continuing
+console.log('\n  Testing Notion connection...');
+try {
+  const resp = await fetch('https://api.notion.com/v1/users/me', {
+    headers: { 'Authorization': `Bearer ${notionKey}`, 'Notion-Version': '2022-06-28' }
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    console.error(`  Notion API returned ${resp.status}: ${body.message || 'Unknown error'}`);
+    console.error('  Check your API key and try again.');
+    rl.close();
+    process.exit(1);
+  }
+  const user = await resp.json();
+  console.log(`  Connected as: ${user.name || user.bot?.owner?.user?.name || 'integration'}\n`);
+} catch (err) {
+  console.error(`  Could not reach Notion API: ${err.message}`);
+  rl.close();
+  process.exit(1);
+}
+
+console.log('  Enter database IDs from your Notion URLs.');
+console.log('  URL format: notion.so/<workspace>/<DB_ID>?v=...');
+console.log('  The DB ID is the 32-character hex string before the ?v= parameter.\n');
+
 const inputsDbId = await prompt('Inputs DB ID: ');
 const scheduleDbId = await prompt('Schedule DB ID: ');
 const contextDbId = await prompt('Context DB ID: ');
@@ -143,6 +176,15 @@ if (pushNow.trim().toLowerCase() === 'y') {
   if (deployNow.trim().toLowerCase() === 'y') {
     execSync('npx wrangler deploy', { stdio: 'inherit' });
   }
+}
+
+// 7. Verify Notion schema
+console.log('\nVerifying Notion database schemas...');
+try {
+  execSync('node scripts/verify-schema.js', { stdio: 'inherit' });
+} catch {
+  console.log('\nSchema verification found issues. Check the output above and fix any missing properties in Notion.');
+  console.log('You can re-run verification later with: npm run verify-schema');
 }
 
 rl.close();

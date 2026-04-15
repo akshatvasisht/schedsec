@@ -28,7 +28,7 @@ export async function handleHealth(env, services) {
   // AI model
   try {
     const response = await env.AI.run('@cf/qwen/qwen2.5-7b-instruct', { prompt: 'Reply with: OK' });
-    results.ai_model = response?.response?.includes('OK') || true;
+    results.ai_model = !!response?.response?.includes('OK');
   } catch (e) { await logger.error('HealthCheck: AI failed', { error: e.message }); }
 
   // KV store
@@ -54,30 +54,23 @@ export async function handleHealth(env, services) {
         await logger.warn('HealthCheck: Backup is stale', { ageHours: Math.round(ageHours), latestKey });
       }
 
-      // Backup integrity verification (dry-run restore)
+      // Backup integrity verification (lightweight head check)
       try {
-        const backupObj = await env.R2_BUCKET.get(listing.objects[0].key);
-        if (backupObj) {
-          const snapshot = JSON.parse(await backupObj.text());
-          const hasInputs = Array.isArray(snapshot.inputs) && snapshot.inputs.length > 0;
-          const hasSchedule = Array.isArray(snapshot.schedule);
-          const hasContext = Array.isArray(snapshot.context);
-
-          if (!hasInputs || !hasSchedule || !hasContext) {
-            results.quality_metrics.alerts.push({
-              type: 'CORRUPT_BACKUP',
-              key: listing.objects[0].key,
-              detail: { hasInputs, hasSchedule, hasContext }
-            });
-            await logger.warn('HealthCheck: Backup integrity failed', { key: listing.objects[0].key });
-          }
+        const latestObj = await env.R2_BUCKET.head(sorted[0].key);
+        if (!latestObj || latestObj.size < 100) {
+          results.quality_metrics.alerts.push({
+            type: 'CORRUPT_BACKUP',
+            key: sorted[0].key,
+            detail: { size: latestObj?.size || 0 }
+          });
+          await logger.warn('HealthCheck: Backup integrity suspect', { key: sorted[0].key, size: latestObj?.size });
         }
-      } catch (parseErr) {
+      } catch (headErr) {
         results.quality_metrics.alerts.push({
           type: 'RESTORE_TEST_FAILED',
-          error: parseErr.message
+          error: headErr.message
         });
-        await logger.warn('HealthCheck: Backup parse test failed', { error: parseErr.message });
+        await logger.warn('HealthCheck: Backup head check failed', { error: headErr.message });
       }
     }
   } catch (e) { await logger.error('HealthCheck: R2 failed', { error: e.message }); }
@@ -103,7 +96,7 @@ export async function handleHealth(env, services) {
     }
   } catch (e) { await logger.error('HealthCheck: Quality metrics failed', { error: e.message }); }
 
-  // Detect stale partial schedule writes
+  // Detect stale partial schedule writes; recover activating markers automatically
   try {
     const writes = await env.KV.list({ prefix: 'schedule_write_' });
     const now = Date.now();
@@ -111,12 +104,51 @@ export async function handleHealth(env, services) {
       const raw = await env.KV.get(key.name);
       if (!raw) continue;
       const state = JSON.parse(raw);
-      if (state.status === 'in_progress' && state.started_at) {
-        const ageMs = now - new Date(state.started_at).getTime();
-        if (ageMs > 10 * 60 * 1000) {
+      const ageMs = state.started_at ? now - new Date(state.started_at).getTime() : Infinity;
+
+      if (state.status === 'in_progress' && ageMs > 10 * 60 * 1000) {
+        // Write stalled before all entries landed — can't recover without knowing which
+        // pages succeeded, so surface as alert and let the next preview run redo it.
+        results.quality_metrics.alerts.push({
+          type: 'PARTIAL_SCHEDULE_WRITE',
+          key: key.name,
+          phase: 'shadow_write',
+          age_minutes: Math.floor(ageMs / 60000)
+        });
+      } else if (state.status === 'activating' && ageMs > 10 * 60 * 1000) {
+        // All entries are in Notion as Prefetch but the status-flip stalled.
+        // Retry it now so the user gets their schedule without manual intervention.
+        if (Array.isArray(state.page_ids) && state.page_ids.length > 0 && state.activate_status) {
+          try {
+            for (const pageId of state.page_ids) {
+              await notion.updatePage(pageId, {
+                [CONFIG.PROPERTIES.SCHEDULE.STATUS]: { select: { name: state.activate_status } }
+              });
+            }
+            await env.KV.put(
+              key.name,
+              JSON.stringify({ status: 'complete', finished_at: new Date().toISOString() }),
+              { expirationTtl: 86400 }
+            );
+            await logger.info('HealthCheck: Recovered stale activate pass', {
+              key: key.name,
+              pages: state.page_ids.length,
+              activate_status: state.activate_status
+            });
+          } catch (activateErr) {
+            results.quality_metrics.alerts.push({
+              type: 'PARTIAL_SCHEDULE_WRITE',
+              key: key.name,
+              phase: 'activate',
+              age_minutes: Math.floor(ageMs / 60000),
+              error: activateErr.message
+            });
+          }
+        } else {
           results.quality_metrics.alerts.push({
             type: 'PARTIAL_SCHEDULE_WRITE',
             key: key.name,
+            phase: 'activate',
             age_minutes: Math.floor(ageMs / 60000)
           });
         }

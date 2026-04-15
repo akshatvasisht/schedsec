@@ -14,21 +14,10 @@ Because LLM outputs (Qwen 2.5 7B) are inherently probabilistic, we do **not** wr
 
 ## Running Tests
 
-### Automated Suite
-Run the full suite using npm:
 ```bash
-npm test
-```
-
-Run the linter as part of the same verification pass:
-
-```bash
-npm run lint
-```
-
-To run tests in watch mode during development:
-```bash
-npm run test:watch
+npm test          # Full suite (197 tests)
+npm run lint      # ESLint check
+npm run test:watch  # Watch mode during development
 ```
 
 ---
@@ -59,4 +48,11 @@ All changes to the `scheduler/` algorithms MUST pass the Top 10 Regression Scena
 * **File Naming:** Place all tests in the `/tests` directory and use the `.test.js` suffix.
 
 ### Dealing with Dates
-When writing tests that involve "today", either use the `dateStr` dependency injection pattern or mock the system clock internally (Vitest provides `vi.useFakeTimers()`) to prevent tests from failing natively when crossing midnight boundaries.
+When writing tests that involve "today", either inject a fixed `dateStr` or mock the clock:
+
+```js
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-06-01')); });
+afterEach(() => { vi.useRealTimers(); });
+```
+
+Never use `new Date()` or `Date.now()` in test data — tests must not depend on the real clock.

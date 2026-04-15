@@ -5,9 +5,9 @@ export class CollaborativeFilter {
   /**
    * Finds the top-3 most similar historical tasks using Jaccard similarity.
    * Minimum 20% similarity threshold.
-   * @param newTask The parameter.
-   * @param historicalTasks The parameter.
-   * @returns {any} The return value.
+   * @param {object} newTask Task object with a `name` property to match against.
+   * @param {Array<object>} historicalTasks Previously completed tasks to search.
+   * @returns {Array<{task: object, similarity: number}>} Up to 3 matches above the 0.2 threshold, sorted by similarity.
    */
   static findSimilarTasks(newTask, historicalTasks) {
     const scores = historicalTasks.map(historical => ({
@@ -23,9 +23,9 @@ export class CollaborativeFilter {
 
   /**
    * Computes Jaccard similarity between two task names.
-   * @param name1 The parameter.
-   * @param name2 The parameter.
-   * @returns {any} The return value.
+   * @param {string} name1 First task name.
+   * @param {string} name2 Second task name.
+   * @returns {number} Similarity score between 0 and 1.
    */
   static jaccardSimilarity(name1, name2) {
     if (!name1 || !name2) return 0;
@@ -42,9 +42,9 @@ export class CollaborativeFilter {
 
   /**
    * Infers missing fields from the weighted average of similar tasks.
-   * @param task The parameter.
-   * @param historicalTasks The parameter.
-   * @returns {any} The return value.
+   * @param {object} task Task with potentially blank `duration`, `energy`, or `time_preference` fields.
+   * @param {Array<object>} historicalTasks Pool of historical tasks to draw inferences from.
+   * @returns {object} Task copy with inferred fields filled in and a note appended.
    */
   static inferFromSimilar(task, historicalTasks) {
     const similar = CollaborativeFilter.findSimilarTasks(task, historicalTasks);
@@ -78,8 +78,8 @@ export class CollaborativeFilter {
 
   /**
    * Returns the most common value in an array.
-   * @param arr The parameter.
-   * @returns {any} The return value.
+   * @param {Array} arr Array of values to tally.
+   * @returns {any} The value that appears most frequently, or null if the array is empty.
    */
   static mostCommon(arr) {
     const filtered = arr.filter(Boolean);

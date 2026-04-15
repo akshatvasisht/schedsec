@@ -10,12 +10,13 @@ import { BufferLearning } from '../features/buffer-learning.js';
 export class FallbackScheduler {
   /**
    * Generates a sequential schedule based on priority and dependencies.
-   * @param tasks The parameter.
-   * @param workDayStart The parameter.
-   * @param learnedBuffers Optional learned buffer data from BufferLearning.
-   * @returns {any} The return value.
+   * @param {Array<object>} tasks Tasks to schedule, sorted by dependency then urgency.
+   * @param {string} workDayStart Work day start time (HH:MM).
+   * @param {object} learnedBuffers Optional learned buffer data from BufferLearning keyed by energy transition.
+   * @param {string} workDayEnd End of work day (HH:MM). Tasks that would overflow are dropped.
+   * @returns {Array<object>} Sequentially placed schedule entries with start time, duration, and day_number.
    */
-  static generate(tasks, workDayStart = CONFIG.DEFAULTS.WORK_DAY_START, learnedBuffers = {}) {
+  static generate(tasks, workDayStart = CONFIG.DEFAULTS.WORK_DAY_START, learnedBuffers = {}, workDayEnd = CONFIG.DEFAULTS.WORK_DAY_END) {
     // Resolve dependencies
     let sorted;
     try {
@@ -30,9 +31,15 @@ export class FallbackScheduler {
     const schedule = [];
     let prevEnergy = null;
 
+    // Convert end time to minutes for comparison
+    const endMinutes = parseInt(workDayEnd.split(':')[0]) * 60 + parseInt(workDayEnd.split(':')[1]);
+
     for (const task of sorted) {
       const duration = task.duration || CONFIG.DEFAULTS.TASK_DURATION;
       const energy = task.energy || 'Unknown';
+
+      const currentMinutes = parseInt(currentTime.split(':')[0]) * 60 + parseInt(currentTime.split(':')[1]);
+      if (currentMinutes + duration > endMinutes) break;
 
       schedule.push({
         task_id: task.id,

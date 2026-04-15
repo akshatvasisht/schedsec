@@ -135,6 +135,22 @@ describe('RT009: Multi-day task splitting with energy decay', () => {
     expect(segments[2].duration).toBe(120); // 25%
     expect(segments[0].duration + segments[1].duration + segments[2].duration).toBe(480);
   });
+
+  it('2-day split sums to total duration (B29 regression)', () => {
+    const task = { id: 't1', name: 'Design doc', duration: 120, estimated_days: 2 };
+    const segments = MultiDayScheduler.splitTask(task);
+    expect(segments.length).toBe(2);
+    expect(segments[0].duration + segments[1].duration).toBe(120);
+    expect(segments[0].duration).toBeGreaterThan(segments[1].duration); // front-loaded
+  });
+
+  it('4-day split sums to total duration (B29 regression)', () => {
+    const task = { id: 't1', name: 'Big project', duration: 240, estimated_days: 4 };
+    const segments = MultiDayScheduler.splitTask(task);
+    expect(segments.length).toBe(4);
+    const total = segments.reduce((s, seg) => s + seg.duration, 0);
+    expect(total).toBe(240);
+  });
 });
 
 describe('RT010: Inference pattern matching', () => {
@@ -145,5 +161,28 @@ describe('RT010: Inference pattern matching', () => {
     expect(inferred.duration).toBe(60);
     expect(inferred.energy).toBe('Moderate');
     expect(inferred.priority).toBe('High');
+  });
+});
+
+describe('RT011: Energy budget — downgraded tasks count against new level (B36 regression)', () => {
+  it('downgraded Deep tasks consume Moderate budget', () => {
+    // 5 Deep tasks × 60min = 300min > 240min Deep budget → all overflow to Moderate
+    // 6 Moderate tasks × 60min = 360min = exactly Moderate budget
+    // Together they should saturate Moderate (360min) so the downgraded ones push it over
+    const tasks = [
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `d${i}`, duration: 60, energy: 'Deep' })),
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `m${i}`, duration: 60, energy: 'Moderate' }))
+    ];
+    const result = OptimizationEngine.enforceEnergyBudgets(tasks);
+    const moderateMins = result
+      .filter(t => t.energy === 'Moderate')
+      .reduce((s, t) => s + t.duration, 0);
+    expect(moderateMins).toBeLessThanOrEqual(360); // Moderate budget = 6h
+  });
+
+  it('Deep tasks within budget are not downgraded', () => {
+    const tasks = [{ id: 't1', duration: 60, energy: 'Deep' }];
+    const result = OptimizationEngine.enforceEnergyBudgets(tasks);
+    expect(result[0].energy).toBe('Deep');
   });
 });

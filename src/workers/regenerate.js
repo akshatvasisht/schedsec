@@ -30,8 +30,8 @@ export async function handleRegenerate(env, services, dateStr) {
 
     const currentSchedule = currentScheduleResponse.results.map(page => ({
       id: page.id,
-      task_id: page.properties[CONFIG.PROPERTIES.SCHEDULE.TASK].relation[0]?.id,
-      start: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_START].rich_text[0]?.plain_text,
+      task_id: page.properties[CONFIG.PROPERTIES.SCHEDULE.TASK].relation?.[0]?.id,
+      start: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_START].rich_text?.[0]?.plain_text,
       duration: page.properties[CONFIG.PROPERTIES.SCHEDULE.AI_DURATION].number
     }));
 

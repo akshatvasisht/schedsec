@@ -14,8 +14,8 @@ export class TaskBatching {
 
   /**
    * Categorizes a task based on name keywords.
-   * @param task The parameter.
-   * @returns {any} The return value.
+   * @param {object} task Task object with a name property to match against category keywords.
+   * @returns {string|null} Category name such as "communication" or "review", or null if no keyword matches.
    */
   static categorize(task) {
     const name = (task.name || '').toLowerCase();
@@ -29,8 +29,8 @@ export class TaskBatching {
 
   /**
    * Groups tasks by detected category.
-   * @param tasks The parameter.
-   * @returns {{batched: object, unbatched: Array}} An object containing the batched and unbatched tasks.
+   * @param {Array<object>} tasks Full list of tasks to partition by keyword category.
+   * @returns {{batched: object, unbatched: Array<object>}} Object where batched maps category name to task arrays and unbatched holds tasks that matched no category.
    */
   static groupTasks(tasks) {
     const batched = {};
@@ -51,8 +51,8 @@ export class TaskBatching {
 
   /**
    * Returns batching hints to include in the AI prompt.
-   * @param tasks The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object>} tasks Full list of tasks to analyse for adjacent-scheduling opportunities.
+   * @returns {Array<string>} Human-readable hint strings for each category that contains two or more tasks.
    */
   static getBatchingHints(tasks) {
     const { batched } = this.groupTasks(tasks);

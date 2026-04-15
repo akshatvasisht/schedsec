@@ -72,7 +72,8 @@ export const CONFIG = {
     MAX_EDITS_PER_DAY: 10,
     MIN_DURATION_ACCURACY: 0.70,
     MAX_JSON_FAILURES: 0.10,
-    MIN_TIME_SLOT_ACCEPTANCE: 0.60
+    MIN_TIME_SLOT_ACCEPTANCE: 0.60,
+    MAX_WOW_COMPLETION_DROP: 15   // percentage points; single-week drop triggers DECLINING_COMPLETION alert
   },
 
   // Multi-day Energy Decay Weights

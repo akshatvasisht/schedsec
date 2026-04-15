@@ -84,12 +84,12 @@ export async function handleCleanup(env, services) {
   }
 
   // Clean up bootstrap data if applicable
-  await cleanupBootstrapData(env);
+  await cleanupBootstrapData(env, services);
 
   // Purge old logs (>30 days)
   const oldLogs = await notion.queryDatabase(env.LOGS_DB_ID, {
     property: P.LOGS.TIMESTAMP,
-    date: { before: thirtyDaysAgo.toISOString() }
+    date: { before: thirtyDaysAgo.toISOString().split('T')[0] }
   });
   for (const log of oldLogs.results) {
     await notion.archivePage(log.id);

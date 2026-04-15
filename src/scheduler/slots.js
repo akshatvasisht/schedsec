@@ -7,12 +7,12 @@ import { CONFIG } from '../config.js';
 export class SlotFinder {
   /**
    * Finds the earliest available slot for a task.
-   * @param duration The parameter.
-   * @param constraints The parameter.
-   * @param existingSchedule The parameter.
-   * @param workDayStart The parameter.
-   * @param workDayEnd The parameter.
-   * @returns {any} The return value.
+   * @param {number} duration - Required duration in minutes.
+   * @param {object} constraints - Scheduling constraints (e.g. mustCompleteBy).
+   * @param {Array<object>} existingSchedule - Existing scheduled blocks with start/duration.
+   * @param {string} [workDayStart] - Work day start time (HH:MM).
+   * @param {string} [workDayEnd] - Work day end time (HH:MM).
+   * @returns {string|null} Earliest available start time (HH:MM), or null if none found.
    */
   static findEarliestSlot(duration, constraints, existingSchedule, workDayStart = CONFIG.DEFAULTS.WORK_DAY_START, workDayEnd = CONFIG.DEFAULTS.WORK_DAY_END) {
     const startLimit = timeToMinutes(workDayStart);
@@ -57,10 +57,10 @@ export class SlotFinder {
 
   /**
    * Checks if a specific time is available.
-   * @param start The parameter.
-   * @param duration The parameter.
-   * @param existingSchedule The parameter.
-   * @returns {any} The return value.
+   * @param {string} start - Start time (HH:MM).
+   * @param {number} duration - Duration in minutes.
+   * @param {Array<object>} existingSchedule - Existing scheduled blocks.
+   * @returns {boolean} True if the slot is free.
    */
   static isAvailable(start, duration, existingSchedule) {
     return !existingSchedule.some(s =>

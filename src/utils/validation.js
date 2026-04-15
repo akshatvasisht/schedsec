@@ -62,3 +62,33 @@ export const LearnedRuleSchema = z.object({
   vector_id: z.string().optional(),
   source: z.string()
 });
+
+// --- Input Validation Schemas ---
+export const PanicOverrideSchema = z.object({
+  mode: z.enum(['sick', 'custom']).optional(),
+  reason: z.string().max(200).optional(),
+  max_work_hours: z.number().min(0).max(24).optional(),
+  energy_filter: z.enum(['Deep', 'Moderate', 'Light']).nullable().optional(),
+  priority_filter: z.enum(['High', 'Medium', 'Low']).nullable().optional()
+});
+
+export const CalendarBlockSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: z.string().regex(/^\d{2}:\d{2}$/),
+  end: z.string().regex(/^\d{2}:\d{2}$/),
+  label: z.string().max(200).optional()
+});
+
+export const CalendarRemoveSchema = z.object({
+  index: z.number().int().min(0)
+});
+
+export const RestoreSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  scope: z.enum(['all', 'inputs', 'schedule', 'context']).optional()
+});
+
+export const PlanningSchema = z.object({
+  tasks: z.array(z.any()).optional().default([]),
+  modifications: z.record(z.any()).optional().default({})
+});

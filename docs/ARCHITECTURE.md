@@ -22,14 +22,19 @@ SchedSec uses a **Three-Layer Serverless Architecture**:
 ```
 /src
 ├── config.js              # Global constants and Notion property mappings
-├── index.js               # Main Cloudflare Worker entrypoint (HTTP + Cron)
-├── notion-client.js       # Rate-limited Notion API wrapper
-├── workers/               # Core worker pipelines (preview, final, cleanup, etc.)
-├── scheduler/             # AI prompting, optimizations, multi-day, routing
-├── learning/              # Rule extraction, semantic search, confidence decay
-├── features/              # Smart features (batching, onboarding, energy curve)
-└── utils/                 # Time manipulation, Zod validation
-/tests                     # Vitest regression and unit tests
+├── context.js             # ContextManager — reads/writes Context DB with in-memory cache
+├── errors.js              # Custom error classes (SchedSecError, DependencyCycleError, etc.)
+├── index.js               # Main Cloudflare Worker entrypoint (HTTP + Cron dispatch)
+├── logger.js              # Buffered logger — batches writes, flushes once per request
+├── notion-client.js       # Rate-limited Notion API wrapper (3 req/s queue)
+├── bootstrap.js           # First-run seeding: starter patterns, rules, and example tasks
+├── trigger.js             # HMAC-signed token verification for Notion button URLs
+├── workers/               # Scheduled and on-demand pipelines (preview, final, stats, etc.)
+├── scheduler/             # Constraint solvers: dependencies, slots, prompt, multi-day, etc.
+├── learning/              # Rule extraction, Vectorize semantic search, confidence decay
+├── features/              # Idempotency, undo, panic mode, planning, energy curve, etc.
+└── utils/                 # Time math (time.js) and Zod schema validation (validation.js)
+/tests                     # Vitest unit, integration, and regression tests (RT001–RT010)
 ```
 
 ## Tech Stack & Decision Record
@@ -49,11 +54,11 @@ SchedSec uses a **Three-Layer Serverless Architecture**:
     *   `preview.js` fetches active tasks.
     *   Algorithmic resolving: Recurrence processing, multi-day splitting, dependency topological sort.
     *   AI Generation: Semantic search retrieves rules. AI maps tasks to time slots via prompt engineering.
-    *   Output: Draft schedule written to Notion Schedule DB (Status: Preview).
+    *   Output: Draft schedule written to Notion Schedule DB using a shadow-write pattern — entries are first written as `Prefetch` (invisible to the user's filtered view), then atomically flipped to `Preview` in a second pass. This prevents the user from seeing a half-built schedule.
 3.  **Final (user-configured, e.g. 5:30 AM local):**
     *   `final.js` reads the Schedule DB.
     *   Compares `AI_Start` vs `Final_Start` (user edits).
-    *   Extracts rules from edits, updates EMA models, creates an Undo snapshot in KV.
+    *   Extracts rules from edits, updates Bayesian duration models, creates an Undo snapshot in KV.
     *   Output: Finalizes schedule (Status: Scheduled).
 
 ## Deterministic Algorithms (Constraint Solvers)

@@ -18,6 +18,13 @@ import { ContextManager } from './context.js';
 import { Logger } from './logger.js';
 import { validateTriggerToken } from './trigger.js';
 import { CONFIG, validateEnv } from './config.js';
+import {
+  PanicOverrideSchema,
+  CalendarBlockSchema,
+  CalendarRemoveSchema,
+  RestoreSchema,
+  PlanningSchema
+} from './utils/validation.js';
 
 function withCors(response) {
   response.headers.set('Access-Control-Allow-Origin', '*');
@@ -86,29 +93,28 @@ export default {
   async fetch(request, env, _ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
-    const authHeader = request.headers.get('Authorization');
-    const services = await createServices(env);
 
     if (request.method === 'OPTIONS') {
       return withCors(new Response(null, { status: 204 }));
     }
 
-    try {
+    // Trigger endpoint has its own HMAC auth
+    if (path === '/trigger') {
       validateEnv(env);
       const today = await getToday(env);
+      const action = url.searchParams.get('action');
+      const token = url.searchParams.get('token');
+      const dateStr = url.searchParams.get('date') || today;
+      if (!env.BUTTON_SECRET) {
+        return jsonResponse({ error: 'BUTTON_SECRET not configured' }, 503);
+      }
+      const valid = await validateTriggerToken(action, dateStr, token || '', env.BUTTON_SECRET);
+      if (!valid) {
+        return jsonResponse({ error: 'Invalid or expired token' }, 401);
+      }
 
-      if (path === '/trigger') {
-        const action = url.searchParams.get('action');
-        const token = url.searchParams.get('token');
-        const dateStr = url.searchParams.get('date') || today;
-        if (!env.BUTTON_SECRET) {
-          return jsonResponse({ error: 'BUTTON_SECRET not configured' }, 503);
-        }
-        const valid = await validateTriggerToken(action, dateStr, token || '', env.BUTTON_SECRET);
-        if (!valid) {
-          return jsonResponse({ error: 'Invalid or expired token' }, 401);
-        }
-
+      const services = await createServices(env);
+      try {
         let result;
         if (action === 'regenerate') {
           result = await handleRegenerate(env, services, dateStr);
@@ -121,11 +127,24 @@ export default {
           return jsonResponse({ error: 'Unknown action' }, 400);
         }
         return jsonResponse(result);
+      } catch (error) {
+        await services.logger.error('Trigger endpoint error', { error: error.message, stack: error.stack });
+        return jsonResponse({ error: 'Internal error' }, 500);
+      } finally {
+        await flushServices(services);
       }
+    }
 
-      if (authHeader !== `Bearer ${env.WORKER_AUTH_TOKEN}`) {
-        return withCors(new Response('Unauthorized', { status: 401 }));
-      }
+    // All other routes require bearer token
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader !== `Bearer ${env.WORKER_AUTH_TOKEN}`) {
+      return withCors(new Response('Unauthorized', { status: 401 }));
+    }
+
+    const services = await createServices(env);
+    try {
+      validateEnv(env);
+      const today = await getToday(env);
 
       let result;
 
@@ -151,7 +170,7 @@ export default {
           break;
 
         case '/bootstrap':
-          result = await bootstrapSystem(env);
+          result = await bootstrapSystem(env, services);
           break;
 
         case '/onboard': {
@@ -173,7 +192,12 @@ export default {
             await services.context.set('daily_override', null, 'Panic mode cleared');
             result = { success: true, message: 'Panic mode cleared' };
           } else {
-            const body = await request.json().catch(() => ({}));
+            const raw = await request.json().catch(() => ({}));
+            const parsed = PanicOverrideSchema.safeParse(raw);
+            if (!parsed.success) {
+              return jsonResponse({ error: 'Invalid input', details: parsed.error.issues }, 400);
+            }
+            const body = parsed.data;
             const override = body.mode === 'sick'
               ? PanicManager.getSickModeOverride()
               : {
@@ -189,12 +213,22 @@ export default {
         }
 
         case '/calendar': {
-          const body = await request.json();
           const calendar = new CalendarBlocks(services.context);
           if (request.method === 'POST') {
+            const raw = await request.json();
+            const parsed = CalendarBlockSchema.safeParse(raw);
+            if (!parsed.success) {
+              return jsonResponse({ error: 'Invalid input', details: parsed.error.issues }, 400);
+            }
+            const body = parsed.data;
             result = await calendar.addBlock(body.date, body.start, body.end, body.label);
           } else if (request.method === 'DELETE') {
-            result = await calendar.removeBlock(body.index);
+            const raw = await request.json();
+            const parsed = CalendarRemoveSchema.safeParse(raw);
+            if (!parsed.success) {
+              return jsonResponse({ error: 'Invalid input', details: parsed.error.issues }, 400);
+            }
+            result = await calendar.removeBlock(parsed.data.index);
           } else {
             result = await calendar.getBlocks();
           }
@@ -202,7 +236,12 @@ export default {
         }
 
         case '/planning': {
-          const body = await request.json().catch(() => ({}));
+          const raw = await request.json().catch(() => ({}));
+          const parsed = PlanningSchema.safeParse(raw);
+          if (!parsed.success) {
+            return jsonResponse({ error: 'Invalid input', details: parsed.error.issues }, 400);
+          }
+          const body = parsed.data;
           result = await PlanningManager.generateWhatIf(body.tasks, body.modifications, env, today);
           break;
         }
@@ -214,10 +253,12 @@ export default {
         }
 
         case '/restore': {
-          const body = await request.json();
-          if (!body.date) {
-            return jsonResponse({ error: 'date parameter required (YYYY-MM-DD)' }, 400);
+          const raw = await request.json();
+          const parsed = RestoreSchema.safeParse(raw);
+          if (!parsed.success) {
+            return jsonResponse({ error: 'Invalid input', details: parsed.error.issues }, 400);
           }
+          const body = parsed.data;
           const scope = body.scope || 'all';
           result = await restoreFromBackup(env, services, body.date, scope);
           break;
@@ -229,10 +270,11 @@ export default {
             format: url.searchParams.get('format') || 'csv'
           };
           const exportResult = await handleExport(env, services, params);
-          if (exportResult.csv) {
-            return withCors(new Response(exportResult.csv, {
+          if (exportResult.csv || exportResult.ics) {
+            const body = exportResult.csv || exportResult.ics;
+            return withCors(new Response(body, {
               headers: {
-                'Content-Type': 'text/csv',
+                'Content-Type': exportResult.contentType,
                 'Content-Disposition': `attachment; filename="${exportResult.filename}"`
               }
             }));
@@ -272,7 +314,8 @@ export default {
 
       return jsonResponse(result);
     } catch (error) {
-      return jsonResponse({ error: error.message }, 500);
+      await services.logger.error('Request failed', { error: error.message, stack: error.stack });
+      return jsonResponse({ error: 'Internal error' }, 500);
     } finally {
       await flushServices(services);
     }

@@ -42,10 +42,10 @@ export class BufferLearning {
 
   /**
    * Returns the learned buffer for a specific transition, or default.
-   * @param fromEnergy The parameter.
-   * @param toEnergy The parameter.
-   * @param learnedBuffers The parameter.
-   * @returns {any} The return value.
+   * @param {string} fromEnergy Energy level of the ending task (e.g. "Deep", "Moderate", "Light").
+   * @param {string} toEnergy Energy level of the starting task used to look up the transition key.
+   * @param {object} learnedBuffers Map of "fromEnergy→toEnergy" → { avgBuffer, samples } produced by extractTransitionBuffers.
+   * @returns {number} Learned average buffer in minutes if at least 3 samples exist, otherwise a hard-coded default.
    */
   static getBuffer(fromEnergy, toEnergy, learnedBuffers) {
     const key = `${fromEnergy}→${toEnergy}`;
@@ -61,9 +61,9 @@ export class BufferLearning {
 
   /**
    * Adds minutes to a HH:MM string.
-   * @param timeStr The parameter.
-   * @param minutes The parameter.
-   * @returns {any} The return value.
+   * @param {string} timeStr Start time in "HH:MM" 24-hour format.
+   * @param {number} minutes Number of minutes to add, which may wrap past midnight.
+   * @returns {string} Resulting time in "HH:MM" format.
    */
   static addMinutes(timeStr, minutes) {
     const [h, m] = timeStr.split(':').map(Number);
@@ -73,9 +73,9 @@ export class BufferLearning {
 
   /**
    * Calculates the difference in minutes between two HH:MM strings.
-   * @param endStr The parameter.
-   * @param startStr The parameter.
-   * @returns {any} The return value.
+   * @param {string} endStr End time in "HH:MM" 24-hour format.
+   * @param {string} startStr Start time in "HH:MM" 24-hour format to subtract from endStr.
+   * @returns {number} Signed difference in minutes (positive when end is after start).
    */
   static diffMinutes(endStr, startStr) {
     const [eh, em] = endStr.split(':').map(Number);

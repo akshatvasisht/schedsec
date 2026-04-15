@@ -79,13 +79,37 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
       };
     });
 
+    // Batch all independent context reads (Promise.all is fine for reads per CLAUDE.md)
+    const [
+      workDays,
+      inferencePatterns,
+      learnedRulesVectors,
+      hardConstraints,
+      externalBlocks,
+      workHours,
+      userTimezone
+    ] = await Promise.all([
+      context.get('work_days'),
+      context.get('inference_patterns_v2'),
+      context.get('learned_rules_vectors'),
+      context.get('hard_constraints'),
+      context.get('external_calendar_blocks'),
+      context.get('work_hours'),
+      context.get('user_timezone_current')
+    ]);
+
+    const patterns = inferencePatterns || {};
+    const rules = learnedRulesVectors || {};
+
     // Process Recurring Tasks
+    const recurrenceInstances = [];
     for (const task of tasks) {
-      if (RecurrenceManager.shouldGenerate(task, dateStr)) {
+      if (RecurrenceManager.shouldGenerate(task, dateStr, workDays)) {
         const instance = RecurrenceManager.createInstance(task, dateStr);
-        tasks.push(instance);
+        recurrenceInstances.push(instance);
       }
     }
+    tasks = tasks.concat(recurrenceInstances);
 
     // Apply Panic Mode Overrides
     if (dailyOverride) {
@@ -93,8 +117,6 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
     }
 
     // Inference & Normalization
-    const patterns = await context.get('inference_patterns_v2') || {};
-    const rules = await context.get('learned_rules_vectors') || {};
     tasks = tasks.map(t => InferenceEngine.inferFields(t, patterns, rules.rules || []));
 
     // Handle Multi-Day Tasks
@@ -145,11 +167,10 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
       await logger.warn('Vectorize search failed, proceeding without semantic rules', { error: e.message });
     }
 
-    // Load Hard Constraints and Calendar Blocks
-    const hardConstraints = await context.get('hard_constraints') || [];
-    const externalBlocks = await context.get('external_calendar_blocks') || [];
-    const workHours = await context.get('work_hours') || { start: CONFIG.DEFAULTS.WORK_DAY_START, end: CONFIG.DEFAULTS.WORK_DAY_END };
-    const userTimezone = await context.get('user_timezone_current');
+    // Apply defaults to batched context reads
+    const resolvedHardConstraints = hardConstraints || [];
+    const resolvedExternalBlocks = externalBlocks || [];
+    const resolvedWorkHours = workHours || { start: CONFIG.DEFAULTS.WORK_DAY_START, end: CONFIG.DEFAULTS.WORK_DAY_END };
 
     // Load bandit slot hints per energy category
     let slotHints = {};
@@ -184,13 +205,13 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
       date: dateStr,
       dayName,
       timezone: userTimezone?.current || CONFIG.DEFAULTS.TIMEZONE,
-      workStart: workHours.start,
-      workEnd: workHours.end,
+      workStart: resolvedWorkHours.start,
+      workEnd: resolvedWorkHours.end,
       rules: relevantRules,
       patterns,
-      hardConstraints,
+      hardConstraints: resolvedHardConstraints,
       fixedAppointments,
-      externalCalendarBlocks: externalBlocks,
+      externalCalendarBlocks: resolvedExternalBlocks,
       availableSlots: [],
       dependencies: sortedTasks.map(t => t.id),
       slotHints,
@@ -245,7 +266,7 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
         attempts: aiAttempts,
         run_mode: env.RUN_MODE || 'standard'
       });
-      schedule = FallbackScheduler.generate(sortedTasks, workHours.start, learnedBuffers);
+      schedule = FallbackScheduler.generate(sortedTasks, resolvedWorkHours.start, learnedBuffers);
     }
 
     // Track AI quality metrics
@@ -257,6 +278,12 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
 
     // Write to Schedule DB with Optimistic Locking
     const writeStatus = statusOverride || CONFIG.STATUS.SCHEDULE.PREVIEW;
+    // Shadow-write: only for Preview status. Write all entries as Prefetch first (invisible to
+    // user's Preview dashboard filter), then activate to Preview in a second pass. This prevents
+    // the user from ever seeing a half-written schedule.
+    const usesShadowWrite = writeStatus === CONFIG.STATUS.SCHEDULE.PREVIEW;
+    const stagingStatus = CONFIG.STATUS.SCHEDULE.PREFETCH;
+
     const lockMap = await OptimisticLock.acquireWriteBatch(
       notion,
       env.SCHEDULE_DB_ID,
@@ -271,6 +298,8 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
       { expirationTtl: 600 }
     );
 
+    // Write all entries (with staging status if shadow-write, else final status)
+    const writtenPageIds = [];
     for (const entry of schedule) {
       let version = 1;
 
@@ -299,34 +328,50 @@ export async function handlePreview(env, services, dateStr, statusOverride = nul
       }
       version = lock.newVersion;
 
-      if (lock.pageId) {
-        // Update existing
-        await notion.updatePage(lock.pageId, {
-          [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
-          [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
-          [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
-          [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
-          [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
-          [P.SCHEDULE.VERSION]: { number: version },
-          [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
-          [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
-        });
-        continue;
-      }
-
-      // Create new
-      await notion.createPage(env.SCHEDULE_DB_ID, {
-        [P.SCHEDULE.DATE]: { date: { start: dateStr } },
-        [P.SCHEDULE.TASK]: { relation: [{ id: entry.task_id }] },
+      const writeProps = {
         [P.SCHEDULE.AI_START]: { rich_text: [{ text: { content: entry.start } }] },
         [P.SCHEDULE.AI_DURATION]: { number: entry.duration },
-        [P.SCHEDULE.STATUS]: { select: { name: writeStatus } },
+        [P.SCHEDULE.STATUS]: { select: { name: usesShadowWrite ? stagingStatus : writeStatus } },
         [P.SCHEDULE.NOTES]: { rich_text: [{ text: { content: enrichedNotes } }] },
         [P.SCHEDULE.DAY_NUMBER]: { number: dayNum },
         [P.SCHEDULE.VERSION]: { number: version },
         [P.SCHEDULE.LAST_MODIFIED]: { date: { start: new Date().toISOString() } },
         [P.SCHEDULE.MODIFIED_BY]: { select: { name: 'AI' } }
-      });
+      };
+
+      if (lock.pageId) {
+        await notion.updatePage(lock.pageId, writeProps);
+        writtenPageIds.push(lock.pageId);
+      } else {
+        const created = await notion.createPage(env.SCHEDULE_DB_ID, {
+          [P.SCHEDULE.DATE]: { date: { start: dateStr } },
+          [P.SCHEDULE.TASK]: { relation: [{ id: entry.task_id }] },
+          ...writeProps
+        });
+        writtenPageIds.push(created.id);
+      }
+    }
+
+    // Flip all staged entries to the real status.
+    // KV is updated to 'activating' with page_ids first so the health check can retry if
+    // the worker dies here — all content is already in Notion, only status needs flipping.
+    if (usesShadowWrite && writtenPageIds.length > 0) {
+      await env.KV.put(
+        `schedule_write_${dateStr}`,
+        JSON.stringify({
+          status: 'activating',
+          started_at: new Date().toISOString(),
+          page_ids: writtenPageIds,
+          activate_status: writeStatus
+        }),
+        { expirationTtl: 600 }
+      );
+
+      for (const pageId of writtenPageIds) {
+        await notion.updatePage(pageId, {
+          [P.SCHEDULE.STATUS]: { select: { name: writeStatus } }
+        });
+      }
     }
 
     await env.KV.put(

@@ -70,7 +70,12 @@ async function verify() {
         console.log(`[OK] ${dbName}`);
       }
     } catch (err) {
-      console.error(`[FAIL] ${dbName}: ${err.message}`);
+      const hint = err.status === 401
+        ? ' (check NOTION_API_KEY)'
+        : err.status === 404
+          ? ' (check DB ID or integration access)'
+          : '';
+      console.error(`[FAIL] ${dbName}: ${err.message}${hint}`);
       failed++;
     }
   }

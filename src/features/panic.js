@@ -4,9 +4,9 @@
 export class PanicManager {
   /**
    * Applies daily overrides to a task list.
-   * @param tasks The parameter.
-   * @param override The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object>} tasks Full list of tasks to filter and cap.
+   * @param {object|null} override Override descriptor containing optional energy_filter, priority_filter, and max_work_hours fields.
+   * @returns {Array<object>} Filtered task list respecting the override constraints, or the original list if no override is provided.
    */
   static applyOverrides(tasks, override) {
     if (!override) return tasks;
@@ -42,7 +42,7 @@ export class PanicManager {
 
   /**
    * Creates a default "Sick Mode" override.
-   * @returns {any} The return value.
+   * @returns {object} Override descriptor limiting work to 3 hours of Light/Moderate High-priority tasks only.
    */
   static getSickModeOverride() {
     return {

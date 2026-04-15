@@ -6,8 +6,8 @@
 export class PatternAnalyzer {
   /**
    * Extracts trends from a collection of historical schedule entries.
-   * @param schedules The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object>} schedules Archived schedule entries, each with task_name, date, final_start, final_duration, ai_duration, and energy fields.
+   * @returns {object} Aggregated patterns with time_prefs, duration_ratios, and seasonal keys.
    */
   static extractPatterns(schedules) {
     const patterns = {
@@ -19,7 +19,7 @@ export class PatternAnalyzer {
     for (const entry of schedules) {
       const taskName = entry.task_name;
       const month = new Date(entry.date).getMonth();
-      const season = Math.floor(month / 3); // 0=Winter, 1=Spring, 2=Summer, 3=Autumn
+      const season = Math.floor((month + 1) / 3) % 4; // 0=Winter, 1=Spring, 2=Summer, 3=Autumn
 
       // Time Preferences
       if (entry.final_start) {
@@ -49,8 +49,8 @@ export class PatternAnalyzer {
 
   /**
    * Aggregates raw data into averages/frequencies.
-   * @param data The parameter.
-   * @returns {any} The return value.
+   * @param {object} data Intermediate object with timePreferences, durationRatios, and seasonalTrends arrays collected by extractPatterns.
+   * @returns {object} Aggregated object with averaged time_prefs (hour), averaged duration_ratios, and raw seasonal entries.
    */
   static aggregate(data) {
     const aggregated = { time_prefs: {}, duration_ratios: {}, seasonal: {} };

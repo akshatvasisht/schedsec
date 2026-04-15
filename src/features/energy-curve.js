@@ -32,8 +32,8 @@ export class EnergyCurve {
   /**
    * Gets the user's peak energy window (top 2 hours by average rating).
    * Requires at least 14 days of data (count >= 14 for any slot).
-   * @param curve The parameter.
-   * @returns {any} The return value.
+   * @param {object} curve Energy curve map of "HH:00" → { totalRating, count } as produced by updateCurve.
+   * @returns {object|null} Object with peakHours array, average rating, and a recommendation string, or null if fewer than 2 slots have enough data.
    */
   static getPeakWindow(curve) {
     const slots = Object.entries(curve)
@@ -47,17 +47,24 @@ export class EnergyCurve {
 
     if (slots.length < 2) return null; // Not enough data
 
+    const topTwo = slots.slice(0, 2).map(s => s.hour).sort();
+    const h1 = parseInt(topTwo[0].split(':')[0]);
+    const h2 = parseInt(topTwo[1].split(':')[0]);
+    const recommendation = (h2 - h1 === 1)
+      ? `Schedule Deep tasks during ${topTwo[0]}-${topTwo[1]} for optimal performance`
+      : `Schedule Deep tasks at ${topTwo[0]} and ${topTwo[1]} for optimal performance`;
+
     return {
-      peakHours: slots.slice(0, 2).map(s => s.hour),
+      peakHours: topTwo,
       avgRating: slots.slice(0, 2).reduce((sum, s) => sum + s.avgRating, 0) / 2,
-      recommendation: `Schedule Deep tasks during ${slots[0].hour}-${slots[1].hour} for optimal performance`
+      recommendation
     };
   }
 
   /**
    * Returns suggested time_preference for Deep tasks based on energy curve.
-   * @param curve The parameter.
-   * @returns {any} The return value.
+   * @param {object} curve Energy curve map of "HH:00" → { totalRating, count } as produced by updateCurve.
+   * @returns {string|null} "Morning", "Afternoon", or "Evening" based on the peak hour, or null if insufficient data.
    */
   static getSuggestedPreference(curve) {
     const peak = this.getPeakWindow(curve);

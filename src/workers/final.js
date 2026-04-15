@@ -11,6 +11,14 @@ import { EnergyCurve } from '../features/energy-curve.js';
 
 const P = CONFIG.PROPERTIES;
 
+function hashText(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 /**
  * Daily Final Generator
  * Analyzes yesterday's user edits to extract rules, then finalizes today's schedule.
@@ -95,7 +103,7 @@ export async function handleFinal(env, services, dateStr) {
       }
 
       const rule = RuleExtractor.createRuleFromEdit(edit, 'system_edit', yesterdayStr, entry.page_id);
-      const ruleId = `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const ruleId = `rule_${hashText(ruleText)}`;
       const ruleText = `${rule.condition} → ${rule.action}`;
 
       try {
@@ -118,7 +126,7 @@ export async function handleFinal(env, services, dateStr) {
           { date: yesterdayStr }
         );
         if (rulesFromNotes) {
-          const ruleId = `note_rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const ruleId = `note_${hashText(ruleText)}`;
           const ruleText = `${rulesFromNotes.condition} → ${rulesFromNotes.action}`;
           try {
             await vectorize.insertRule(ruleId, ruleText, {
@@ -150,19 +158,30 @@ export async function handleFinal(env, services, dateStr) {
       s => s.status === CONFIG.STATUS.SCHEDULE.SKIPPED
     );
 
-    // Update ML patterns (Duration accuracy via EMA)
+    // Update ML patterns (Bayesian duration updates)
     const patterns = await context.get('inference_patterns_v2') || {};
     for (const entry of completedEntries) {
       if (entry.actual_duration && entry.ai_duration && !entry.correction_flag) {
         const taskKeywords = entry.task_name.toLowerCase().split(/\s+/);
         for (const kw of taskKeywords) {
-          if (patterns[kw]) {
-            patterns[kw].duration = MLIntelligence.updateEMA(
-              patterns[kw].duration, entry.actual_duration
-            );
+          if (patterns[kw] && patterns[kw].duration) {
             patterns[kw].samples = (patterns[kw].samples || 0) + 1;
             patterns[kw].last_updated = dateStr;
             patterns[kw].last_reinforced = dateStr;
+            const confidence = Math.min(0.95, 0.50 + ((patterns[kw].samples || 0) * 0.05));
+            const bayesian = MLIntelligence.updateBayesianDuration(
+              patterns[kw].duration, confidence, entry.actual_duration
+            );
+            patterns[kw].duration = bayesian.estimate;
+            patterns[kw].confidence = bayesian.confidence;
+          } else if (!patterns[kw]) {
+            patterns[kw] = {
+              duration: entry.actual_duration,
+              confidence: 0.5,
+              samples: 1,
+              last_updated: dateStr,
+              last_reinforced: dateStr
+            };
           }
         }
       }
@@ -176,24 +195,6 @@ export async function handleFinal(env, services, dateStr) {
           if (!patterns[kw]) patterns[kw] = {};
           patterns[kw].skip_count = (patterns[kw].skip_count || 0) + 1;
           patterns[kw].last_skipped = dateStr;
-        }
-      }
-    }
-    await context.set('inference_patterns_v2', patterns);
-
-    // Bayesian duration updates for tasks with actual completion data
-    for (const entry of completedEntries) {
-      if (entry.actual_duration && entry.ai_duration && !entry.correction_flag) {
-        const taskKeywords = entry.task_name.toLowerCase().split(/\s+/);
-        for (const kw of taskKeywords) {
-          if (patterns[kw] && patterns[kw].duration) {
-            const confidence = Math.min(0.95, 0.50 + ((patterns[kw].samples || 0) * 0.05));
-            const bayesian = MLIntelligence.updateBayesianDuration(
-              patterns[kw].duration, confidence, entry.actual_duration
-            );
-            patterns[kw].duration = bayesian.estimate;
-            patterns[kw].confidence = bayesian.confidence;
-          }
         }
       }
     }
@@ -227,24 +228,19 @@ export async function handleFinal(env, services, dateStr) {
 
     // Update bandit rewards from completed tasks
     try {
+      const toSlot = t => { const h = parseInt(t.split(':')[0]); return h < 12 ? 'morning' : h < 14 ? 'midday' : h < 17 ? 'afternoon' : 'evening'; };
       const bandits = await BanditManager.loadAll(context);
       for (const entry of completedEntries) {
         if (entry.final_start) {
-          const hour = parseInt(entry.final_start.split(':')[0]);
-          const slot = hour < 12 ? 'morning' : hour < 14 ? 'midday' : hour < 17 ? 'afternoon' : 'evening';
-          const energy = 'completed';
-          const bandit = BanditManager.getOrCreate(bandits, energy);
-          bandit.updateReward(slot, 1); // reward = 1 for Done
+          const energy = (entry.energy || 'moderate').toLowerCase();
+          BanditManager.getOrCreate(bandits, energy).updateReward(toSlot(entry.final_start), 1);
         }
       }
       for (const entry of skippedEntries) {
-        if (entry.final_start || entry.ai_start) {
-          const timeStr = entry.final_start || entry.ai_start;
-          const hour = parseInt(timeStr.split(':')[0]);
-          const slot = hour < 12 ? 'morning' : hour < 14 ? 'midday' : hour < 17 ? 'afternoon' : 'evening';
-          const energy = 'completed';
-          const bandit = BanditManager.getOrCreate(bandits, energy);
-          bandit.updateReward(slot, 0); // reward = 0 for Skipped
+        const timeStr = entry.final_start || entry.ai_start;
+        if (timeStr) {
+          const energy = (entry.energy || 'moderate').toLowerCase();
+          BanditManager.getOrCreate(bandits, energy).updateReward(toSlot(timeStr), 0);
         }
       }
       await BanditManager.saveAll(bandits, context);

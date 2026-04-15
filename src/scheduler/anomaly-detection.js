@@ -5,9 +5,9 @@ export class AnomalyDetector {
   /**
    * Compares current schedule metrics against historical baselines.
    * Flags metrics that deviate by more than 2 standard deviations.
-   * @param schedule The parameter.
-   * @param historicalStats The parameter.
-   * @returns {any} The return value.
+   * @param {object} schedule Schedule object with an `entries` array and optional `conflicts` array.
+   * @param {object} historicalStats Historical averages and standard deviations for edit_rate, completion_rate, and conflicts.
+   * @returns {{ is_anomalous: boolean, anomalies: Array, message?: string, suggested_actions?: Array }} Anomaly report.
    */
   static detectAnomalousSchedule(schedule, historicalStats) {
     const metrics = {
@@ -64,8 +64,8 @@ export class AnomalyDetector {
 
   /**
    * Calculates the edit rate (user edits / total entries).
-   * @param schedule The parameter.
-   * @returns {any} The return value.
+   * @param {object} schedule Schedule object with an `entries` array.
+   * @returns {number} Fraction of entries the user manually changed (0–1).
    */
   static calculateEditRate(schedule) {
     const entries = schedule.entries || [];
@@ -80,12 +80,12 @@ export class AnomalyDetector {
 
   /**
    * Calculates the completion rate (done / total).
-   * @param schedule The parameter.
-   * @returns {any} The return value.
+   * @param {object} schedule Schedule object with an `entries` array.
+   * @returns {number} Fraction of entries marked Done or Completed (0–1).
    */
   static calculateCompletionRate(schedule) {
     const entries = schedule.entries || [];
-    if (entries.length === 0) return 1;
+    if (entries.length === 0) return 0;
 
     const completed = entries.filter(e =>
       e.status === 'Done' || e.status === 'Completed'

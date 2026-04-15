@@ -5,7 +5,7 @@
  */
 export class RuleExtractor {
   /**
-   * @param ai The parameter.
+   * @param {object} ai Cloudflare Workers AI binding used to run the Qwen model for rule extraction.
    */
   constructor(ai) {
     this.ai = ai;
@@ -15,9 +15,9 @@ export class RuleExtractor {
   /**
    * Analyzes the difference between AI's plan and User's final schedule.
    * Filters out implausible edits (> 3x duration change, times outside work hours).
-   * @param aiSchedule The parameter.
-   * @param finalSchedule The parameter.
-   * @returns {any} The return value.
+   * @param {Array<object>} aiSchedule Tasks as originally placed by the AI, each with task_id, start, and duration.
+   * @param {Array<object>} finalSchedule Tasks as edited by the user, matched to aiSchedule by task_id.
+   * @returns {Array<object>} List of edit objects describing START_TIME or DURATION changes, with flagged field if implausible.
    */
   static identifyEdits(aiSchedule, finalSchedule) {
     const edits = [];
@@ -43,10 +43,10 @@ export class RuleExtractor {
 
   /**
    * Uses AI to convert natural language notes and edits into structured rules.
-   * @param notes The parameter.
-   * @param edits The parameter.
-   * @param _context The parameter.
-   * @returns {any} The return value.
+   * @param {string} notes Free-text notes left by the user describing scheduling preferences.
+   * @param {Array<object>} edits Structured edits from identifyEdits, included in the prompt for context.
+   * @param {object} _context Unused context object reserved for future prompt enrichment.
+   * @returns {Promise<object>} Parsed rule object with condition and action fields.
    */
   async extractRuleFromNotes(notes, edits, _context) {
     const prompt = `You are a rule extractor for a scheduling system.
@@ -71,11 +71,11 @@ OUTPUT JSON ONLY.`;
   /**
    * Creates a rule object from a structured edit.
    * Includes source metadata for audit trail.
-   * @param edit The parameter.
-   * @param source The parameter.
-   * @param sourceDate The parameter.
-   * @param sourceScheduleId The parameter.
-   * @returns {any} The return value.
+   * @param {object} edit Edit object from identifyEdits with task, type, and user-chosen value.
+   * @param {string} source Label indicating the rule's origin, e.g. 'system_edit' or 'user_note'.
+   * @param {string|null} sourceDate ISO date string for when the source schedule ran; defaults to today.
+   * @param {string|null} sourceScheduleId Notion page ID of the source schedule entry for traceability.
+   * @returns {object} Fully initialized rule object ready for Vectorize insertion.
    */
   static createRuleFromEdit(edit, source = 'system_edit', sourceDate = null, sourceScheduleId = null) {
     const dateStr = sourceDate || new Date().toISOString().split('T')[0];

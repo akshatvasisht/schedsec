@@ -35,7 +35,7 @@ The Worker sends permissive CORS headers on API responses:
 | `POST` | `/planning` | Bearer | Generate an in-memory what-if schedule. |
 | `GET` | `/undo` | Bearer | Restore today's schedule from the latest snapshot. |
 | `POST` | `/restore` | Bearer | Restore one or more databases from an R2 backup. |
-| `GET` | `/export` | Bearer | Export recent schedule history as CSV or JSON. |
+| `GET` | `/export` | Bearer | Export recent schedule history as CSV, JSON, or ICS. |
 | `POST` | `/reset` | Bearer | Run a scoped reset (`rules`, `schedule`, or `full`). |
 | `GET` / `POST` / `DELETE` | `/panic` | Bearer | Read, set, or clear the current daily override. |
 | `POST` | `/webhook` | Bearer | Trigger regenerate with cooldown protection. |
@@ -64,7 +64,9 @@ Returns:
 
 ```json
 {
-  "success": true
+  "success": true,
+  "applied": ["deep_work.time_preference", "work_hours", "timezone", "work_days"],
+  "reset": false
 }
 ```
 
@@ -96,9 +98,9 @@ Returns an in-memory scenario without writing to Notion:
 Query params:
 
 - `days`: lookback window, default `30`
-- `format`: `csv` or `json`, default `csv`
+- `format`: `csv` (default), `json`, or `ics`
 
-CSV returns an attachment. JSON returns:
+CSV and ICS return file attachments. JSON returns:
 
 ```json
 {
@@ -146,3 +148,7 @@ The API uses standard HTTP status codes with JSON error payloads where possible.
 - `500 Internal Server Error`: Unexpected runtime failure
 
 Operational failures are also written to the Notion Logs database through the buffered logger.
+
+## Input Validation
+
+`POST /panic`, `POST /calendar`, `POST /restore`, and `POST /planning` validate request bodies using Zod schemas defined in `src/utils/validation.js`. Invalid payloads return a `400 Bad Request` with a JSON error detailing the first validation failure.

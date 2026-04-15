@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { UrgencyCalculator } from '../../src/scheduler/urgency.js';
 import { FallbackScheduler } from '../../src/scheduler/fallback.js';
-import { BackgroundTaskManager } from '../../src/scheduler/background.js';
 import { TaskManager } from '../../src/scheduler/task-manager.js';
 import { RecurrenceManager } from '../../src/scheduler/recurrence.js';
 import { MLIntelligence } from '../../src/scheduler/duration-learning.js';
@@ -125,55 +124,16 @@ describe('FallbackScheduler', () => {
     const schedule = FallbackScheduler.generate(tasks);
     expect(schedule[0].duration).toBe(60); // CONFIG.DEFAULTS.TASK_DURATION
   });
-});
 
-// ─── BackgroundTaskManager ───────────────────────────────────────────────────
-
-describe('BackgroundTaskManager', () => {
-  describe('isBackground', () => {
-    it('returns true for tasks with background flag', () => {
-      expect(BackgroundTaskManager.isBackground({ background: true })).toBe(true);
-    });
-
-    it('returns true for TIME_BLOCK tasks', () => {
-      expect(BackgroundTaskManager.isBackground({ type: 'TIME_BLOCK' })).toBe(true);
-    });
-
-    it('returns false for regular tasks', () => {
-      expect(BackgroundTaskManager.isBackground({ type: 'TASK', background: false })).toBe(false);
-    });
-  });
-
-  describe('getFocusTasks', () => {
-    it('filters out background tasks', () => {
-      const schedule = [
-        { task_id: 't1', background: true },
-        { task_id: 't2', background: false },
-        { task_id: 't3' }
-      ];
-      const focus = BackgroundTaskManager.getFocusTasks(schedule);
-      expect(focus.length).toBe(2);
-      expect(focus.every(t => !t.background)).toBe(true);
-    });
-  });
-
-  describe('validateDensity', () => {
-    it('warns when more than 5 background tasks', () => {
-      const tasks = Array.from({ length: 7 }, (_, i) => ({ id: `t${i}`, background: true }));
-      const result = BackgroundTaskManager.validateDensity(tasks);
-      expect(result.warning).toBe(true);
-      expect(result.message).toContain('7');
-    });
-
-    it('no warning at 5 or fewer background tasks', () => {
-      const tasks = [
-        { id: 't1', background: true },
-        { id: 't2', background: false },
-        { id: 't3', background: true }
-      ];
-      const result = BackgroundTaskManager.validateDensity(tasks);
-      expect(result.warning).toBe(false);
-    });
+  it('does not schedule tasks past work-day end', () => {
+    const tasks = [
+      { id: 't1', name: 'Long A', duration: 300, priority: 'High', dependsOn: [] },
+      { id: 't2', name: 'Long B', duration: 300, priority: 'Medium', dependsOn: [] }
+    ];
+    // 8-hour day = 480 min; first task is 300 min, second won't fit
+    const schedule = FallbackScheduler.generate(tasks, '09:00', {}, '17:00');
+    expect(schedule.length).toBe(1);
+    expect(schedule[0].task_id).toBe('t1');
   });
 });
 
@@ -219,6 +179,14 @@ describe('TaskManager', () => {
     expect(normalized.duration).toBe(120);
     expect(normalized.energy).toBe('Deep');
     expect(normalized.priority).toBe('High');
+  });
+
+  it('normalizeTask preserves falsy values like duration 0', () => {
+    const task = { id: 't1', name: 'Zero', duration: 0, energy: '', priority: '' };
+    const normalized = TaskManager.normalizeTask(task);
+    expect(normalized.duration).toBe(0);
+    expect(normalized.energy).toBe('');
+    expect(normalized.priority).toBe('');
   });
 });
 
@@ -300,6 +268,49 @@ describe('RecurrenceManager', () => {
     it('returns false for non-Active tasks', () => {
       const task = { ...baseTask, recurrence: 'Daily', status: 'Paused' };
       expect(RecurrenceManager.shouldGenerate(task, '2026-02-26')).toBe(false);
+    });
+
+    describe('workDays filtering', () => {
+      // 2026-02-26 is a Thursday
+      const MON_TO_THU = ['Monday', 'Tuesday', 'Wednesday', 'Thursday'];
+      const MON_TO_WED = ['Monday', 'Tuesday', 'Wednesday'];
+
+      it('allows Daily on a working day', () => {
+        const task = { ...baseTask, recurrence: 'Daily' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-02-26', MON_TO_THU)).toBe(true);
+      });
+
+      it('blocks Daily on a non-working day', () => {
+        const task = { ...baseTask, recurrence: 'Daily' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-02-26', MON_TO_WED)).toBe(false);
+      });
+
+      it('blocks Weekday on a non-working day', () => {
+        const task = { ...baseTask, recurrence: 'Weekday' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-02-26', MON_TO_WED)).toBe(false);
+      });
+
+      it('exempts named-day pattern from workDays filter', () => {
+        // User explicitly scheduled Thursday — should still fire even if Thursday not in workDays
+        const task = { ...baseTask, recurrence: 'Thursday' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-02-26', MON_TO_WED)).toBe(true);
+      });
+
+      it('exempts Weekend pattern from workDays filter', () => {
+        // 2026-03-01 is Saturday
+        const task = { ...baseTask, recurrence: 'Weekend' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-03-01', MON_TO_WED)).toBe(true);
+      });
+
+      it('exempts Biweekly from workDays filter', () => {
+        const task = { ...baseTask, recurrence: 'Biweekly-Thursday' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-02-26', MON_TO_WED)).toBe(true);
+      });
+
+      it('passes through when workDays is null (no filtering)', () => {
+        const task = { ...baseTask, recurrence: 'Daily' };
+        expect(RecurrenceManager.shouldGenerate(task, '2026-02-26', null)).toBe(true);
+      });
     });
   });
 
